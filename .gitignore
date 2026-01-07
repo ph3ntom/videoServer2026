@@ -1,0 +1,23 @@
+# Root level ignores
+*.log
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volumes
+/mnt/
+/postgres_data/
+/video_data/
+/thumbnail_data/
+
+# Uploaded content
+/uploads/
+/videos/
+/thumbnails/
