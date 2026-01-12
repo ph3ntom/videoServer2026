@@ -27,15 +27,27 @@ class VideoService:
         db: AsyncSession,
         skip: int = 0,
         limit: int = 20,
-        status: Optional[VideoStatus] = VideoStatus.READY
+        status: Optional[VideoStatus] = VideoStatus.READY,
+        tag_ids: Optional[List[int]] = None
     ) -> List[Video]:
-        """Get all videos"""
+        """Get all videos with optional tag filtering"""
         from sqlalchemy.orm import selectinload
+        from app.models.associations import video_tags
 
-        query = select(Video).options(selectinload(Video.uploader))
+        query = select(Video).options(selectinload(Video.uploader), selectinload(Video.tags))
 
         if status:
             query = query.where(Video.status == status)
+
+        # Filter by tags if provided
+        if tag_ids:
+            # Join with video_tags and filter by tag IDs
+            query = (
+                query
+                .join(video_tags, Video.id == video_tags.c.video_id)
+                .where(video_tags.c.tag_id.in_(tag_ids))
+                .distinct()
+            )
 
         query = query.order_by(desc(Video.created_at)).offset(skip).limit(limit)
         result = await db.execute(query)

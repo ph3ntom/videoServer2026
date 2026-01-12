@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 import Layout from '../components/common/Layout';
+import TagSelector from '../components/tag/TagSelector';
 import apiClient from '../services/api.client';
 import { useAuthStore } from '../store/authStore';
 
@@ -32,11 +33,22 @@ interface Thumbnail {
   created_at: string;
 }
 
+interface Tag {
+  id: number;
+  name: string;
+  slug: string;
+  color: string;
+}
+
 export default function VideoPlayer() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const [video, setVideo] = useState<Video | null>(null);
   const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [editingTags, setEditingTags] = useState(false);
+  const [tempTags, setTempTags] = useState<Tag[]>([]);
+  const [savingTags, setSavingTags] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -103,10 +115,20 @@ export default function VideoPlayer() {
       const response = await apiClient.get(`/videos/${videoId}`);
       setVideo(response.data);
       loadThumbnails(videoId);
+      loadTags(videoId);
     } catch (err: any) {
       setError('비디오를 불러오는데 실패했습니다');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTags = async (videoId: number) => {
+    try {
+      const response = await apiClient.get(`/videos/${videoId}/tags`);
+      setTags(response.data);
+    } catch (err: any) {
+      console.error('Failed to load tags:', err);
     }
   };
 
@@ -197,6 +219,34 @@ export default function VideoPlayer() {
     } catch (err: any) {
       alert('비디오 삭제에 실패했습니다');
       setDeleting(false);
+    }
+  };
+
+  const handleEditTags = () => {
+    setTempTags([...tags]);
+    setEditingTags(true);
+  };
+
+  const handleCancelEditTags = () => {
+    setTempTags([]);
+    setEditingTags(false);
+  };
+
+  const handleSaveTags = async () => {
+    if (!video) return;
+
+    setSavingTags(true);
+    try {
+      await apiClient.put(`/videos/${video.id}/tags`, {
+        tag_ids: tempTags.map(tag => tag.id)
+      });
+      setTags(tempTags);
+      setEditingTags(false);
+      alert('태그가 저장되었습니다');
+    } catch (err: any) {
+      alert('태그 저장에 실패했습니다');
+    } finally {
+      setSavingTags(false);
     }
   };
 
@@ -295,6 +345,67 @@ export default function VideoPlayer() {
               <span className="text-gray-500">상태</span>
               <p className="text-white capitalize">{video.status}</p>
             </div>
+          </div>
+
+          {/* Tags Section */}
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-white font-semibold">태그</h3>
+              {isOwner && !editingTags && (
+                <button
+                  onClick={handleEditTags}
+                  className="text-sm text-indigo-400 hover:text-indigo-300"
+                >
+                  편집
+                </button>
+              )}
+            </div>
+
+            {editingTags ? (
+              <div className="space-y-4">
+                <TagSelector
+                  selectedTags={tempTags}
+                  onTagsChange={setTempTags}
+                  maxTags={10}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveTags}
+                    disabled={savingTags}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {savingTags ? '저장 중...' : '저장'}
+                  </button>
+                  <button
+                    onClick={handleCancelEditTags}
+                    disabled={savingTags}
+                    className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600 disabled:opacity-50"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {tags.length > 0 ? (
+                  tags.map(tag => (
+                    <span
+                      key={tag.id}
+                      className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium"
+                      style={{
+                        backgroundColor: tag.color + '20',
+                        color: tag.color,
+                        border: `1px solid ${tag.color}`
+                      }}
+                    >
+                      {tag.name}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-gray-500 text-sm">태그가 없습니다</span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

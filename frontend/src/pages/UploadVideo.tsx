@@ -1,12 +1,21 @@
 import { useState, FormEvent, ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/common/Layout';
+import TagSelector from '../components/tag/TagSelector';
 import apiClient from '../services/api.client';
+
+interface Tag {
+  id: number;
+  name: string;
+  slug: string;
+  color: string;
+}
 
 export default function UploadVideo() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState('');
@@ -72,8 +81,21 @@ export default function UploadVideo() {
         },
       });
 
-      // Redirect to video detail page with thumbnail selection prompt
       const videoId = response.data.id;
+
+      // Add tags if selected
+      if (selectedTags.length > 0) {
+        try {
+          await apiClient.post(`/videos/${videoId}/tags`, {
+            tag_ids: selectedTags.map(tag => tag.id)
+          });
+        } catch (tagError) {
+          console.error('Failed to add tags:', tagError);
+          // Continue anyway - tags can be added later
+        }
+      }
+
+      // Redirect to video detail page with thumbnail selection prompt
       navigate(`/videos/${videoId}?selectThumbnail=true`);
     } catch (err: any) {
       setError(err.response?.data?.detail || '비디오 업로드에 실패했습니다');
@@ -126,6 +148,13 @@ export default function UploadVideo() {
               placeholder="비디오에 대한 설명을 입력하세요"
             />
           </div>
+
+          {/* Tags */}
+          <TagSelector
+            selectedTags={selectedTags}
+            onTagsChange={setSelectedTags}
+            maxTags={10}
+          />
 
           {/* File Upload */}
           <div>

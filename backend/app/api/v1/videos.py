@@ -3,7 +3,7 @@ import uuid
 from pathlib import Path
 from typing import List
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +12,10 @@ from app.models.user import User
 from app.models.video import VideoStatus
 from app.schemas.video import VideoCreate, VideoUpdate, VideoResponse, VideoListResponse
 from app.schemas.thumbnail import ThumbnailResponse, ThumbnailSelect
+from app.schemas.tag import TagSimple, VideoTagCreate, VideoTagUpdate
 from app.services.video_service import video_service
 from app.services.thumbnail_service import thumbnail_service
+from app.services.tag_service import tag_service
 from app.core.config import settings
 
 router = APIRouter()
@@ -115,6 +117,7 @@ async def upload_video(
 async def list_videos(
     skip: int = 0,
     limit: int = 20,
+    tag_ids: str = Query(None, description="Comma-separated tag IDs to filter by"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -122,8 +125,26 @@ async def list_videos(
 
     - **skip**: Number of videos to skip (pagination)
     - **limit**: Maximum number of videos to return
+    - **tag_ids**: Comma-separated tag IDs (e.g., "1,2,3")
     """
-    videos = await video_service.get_all(db, skip=skip, limit=limit, status=VideoStatus.READY)
+    # Parse tag IDs if provided
+    tag_id_list = None
+    if tag_ids:
+        try:
+            tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',')]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tag_ids format. Use comma-separated integers."
+            )
+
+    videos = await video_service.get_all(
+        db,
+        skip=skip,
+        limit=limit,
+        status=VideoStatus.READY,
+        tag_ids=tag_id_list
+    )
 
     # Transform to include uploader username
     result = []
@@ -546,3 +567,150 @@ async def get_selected_thumbnail(
     media_type = media_types.get(file_ext, 'image/webp')
 
     return FileResponse(video.thumbnail_path, media_type=media_type)
+
+
+# Tag endpoints
+
+@router.get("/{video_id}/tags", response_model=List[TagSimple])
+async def get_video_tags(
+    video_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get all tags for a video
+
+    - **video_id**: Video ID
+    """
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(
+        select(Video).options(selectinload(Video.tags)).where(Video.id == video_id)
+    )
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    return video.tags
+
+
+@router.post("/{video_id}/tags", response_model=List[TagSimple])
+async def add_tags_to_video(
+    video_id: int,
+    tag_data: VideoTagCreate,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Add tags to a video (uploader only)
+
+    - **video_id**: Video ID
+    - **tag_ids**: List of tag IDs to add
+    """
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(
+        select(Video).options(selectinload(Video.tags)).where(Video.id == video_id)
+    )
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    # Check ownership
+    if video.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to modify this video"
+        )
+
+    tags = await tag_service.add_tags_to_video(db, video, tag_data.tag_ids)
+    return tags
+
+
+@router.put("/{video_id}/tags", response_model=List[TagSimple])
+async def update_video_tags(
+    video_id: int,
+    tag_data: VideoTagUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update video tags (replace all existing tags)
+
+    - **video_id**: Video ID
+    - **tag_ids**: List of tag IDs (replaces all existing)
+    """
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(
+        select(Video).options(selectinload(Video.tags)).where(Video.id == video_id)
+    )
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    # Check ownership
+    if video.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to modify this video"
+        )
+
+    tags = await tag_service.set_video_tags(db, video, tag_data.tag_ids)
+    return tags
+
+
+@router.delete("/{video_id}/tags/{tag_id}", response_model=List[TagSimple])
+async def remove_tag_from_video(
+    video_id: int,
+    tag_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Remove a tag from a video (uploader only)
+
+    - **video_id**: Video ID
+    - **tag_id**: Tag ID to remove
+    """
+    from sqlalchemy.orm import selectinload
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(
+        select(Video).options(selectinload(Video.tags)).where(Video.id == video_id)
+    )
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    # Check ownership
+    if video.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to modify this video"
+        )
+
+    tags = await tag_service.remove_tags_from_video(db, video, [tag_id])
+    return tags

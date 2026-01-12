@@ -19,27 +19,56 @@ interface Video {
   uploader_username: string;
 }
 
+interface Tag {
+  id: number;
+  name: string;
+  slug: string;
+  color: string;
+  video_count: number;
+}
+
 export default function Videos() {
   const [videos, setVideos] = useState<Video[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [selectedTag, setSelectedTag] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     loadVideos();
+    loadPopularTags();
   }, []);
+
+  useEffect(() => {
+    loadVideos();
+  }, [selectedTag]);
 
   const loadVideos = async () => {
     setLoading(true);
     setError('');
 
     try {
-      const response = await apiClient.get('/videos/');
+      const params = selectedTag ? `?tag_ids=${selectedTag}` : '';
+      const response = await apiClient.get(`/videos/${params}`);
       setVideos(response.data);
     } catch (err: any) {
       setError('비디오 목록을 불러오는데 실패했습니다');
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadPopularTags = async () => {
+    try {
+      const response = await apiClient.get('/tags/popular?limit=10');
+      setTags(response.data);
+    } catch (err: any) {
+      console.error('Failed to load tags:', err);
+    }
+  };
+
+  const handleTagClick = (tagId: number) => {
+    setSelectedTag(selectedTag === tagId ? null : tagId);
   };
 
 
@@ -55,6 +84,43 @@ export default function Videos() {
             + 비디오 업로드
           </Link>
         </div>
+
+        {/* Tag Filter */}
+        {tags.length > 0 && (
+          <div className="mb-6">
+            <h2 className="text-sm font-medium text-gray-400 mb-3">인기 태그</h2>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setSelectedTag(null)}
+                className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                  selectedTag === null
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+              >
+                전체
+              </button>
+              {tags.map(tag => (
+                <button
+                  key={tag.id}
+                  onClick={() => handleTagClick(tag.id)}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                    selectedTag === tag.id
+                      ? 'ring-2 ring-offset-2 ring-offset-gray-900'
+                      : 'hover:opacity-80'
+                  }`}
+                  style={{
+                    backgroundColor: selectedTag === tag.id ? tag.color : tag.color + '40',
+                    color: selectedTag === tag.id ? '#fff' : tag.color,
+                    border: `1px solid ${tag.color}`
+                  }}
+                >
+                  {tag.name} ({tag.video_count})
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded mb-6">
