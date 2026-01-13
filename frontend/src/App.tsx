@@ -6,55 +6,76 @@ import VerifyEmail from './pages/VerifyEmail'
 import Videos from './pages/Videos'
 import VideoPlayer from './pages/VideoPlayer'
 import UploadVideo from './pages/UploadVideo'
+import SearchPage from './pages/SearchPage'
+import ProfilePage from './pages/ProfilePage'
 import PrivateRoute from './components/common/PrivateRoute'
+import ErrorBoundary from './components/common/ErrorBoundary'
 
 function App() {
   return (
-    <Router>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/verify-email" element={<VerifyEmail />} />
+    <ErrorBoundary>
+      <Router>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
 
-        {/* Protected routes */}
-        <Route
-          path="/"
-          element={
-            <PrivateRoute>
-              <Home />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/videos"
-          element={
-            <PrivateRoute>
-              <Videos />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/videos/:id"
-          element={
-            <PrivateRoute>
-              <VideoPlayer />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/upload"
-          element={
-            <PrivateRoute>
-              <UploadVideo />
-            </PrivateRoute>
-          }
-        />
+          {/* Protected routes */}
+          <Route
+            path="/"
+            element={
+              <PrivateRoute>
+                <Home />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/videos"
+            element={
+              <PrivateRoute>
+                <Videos />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/videos/:id"
+            element={
+              <PrivateRoute>
+                <VideoPlayer />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/upload"
+            element={
+              <PrivateRoute>
+                <UploadVideo />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/search"
+            element={
+              <PrivateRoute>
+                <SearchPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <PrivateRoute>
+                <ProfilePage />
+              </PrivateRoute>
+            }
+          />
 
-        {/* Catch all - redirect to home */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
+          {/* Catch all - redirect to home */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Router>
+    </ErrorBoundary>
   )
 }
 

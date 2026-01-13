@@ -375,8 +375,6 @@ Authorization: Bearer <access_token>
         },
         "avg_rating": 4.5,
         "rating_count": 100,
-        "comment_count": 50,
-        "favorite_count": 200,
         "created_at": "2024-01-01T00:00:00Z",
         "published_at": "2024-01-01T00:00:00Z"
     }
@@ -720,43 +718,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 6.2 찜하기
-
-**POST** `/api/v1/videos/{video_id}/favorite`
-
-비디오를 찜 목록에 추가합니다.
-
-#### Headers
-```
-Authorization: Bearer <access_token>
-```
-
-#### Response (201 Created)
-```json
-{
-    "success": true,
-    "message": "Video added to favorites"
-}
-```
-
----
-
-### 6.3 찜하기 취소
-
-**DELETE** `/api/v1/videos/{video_id}/favorite`
-
-찜 목록에서 제거합니다.
-
-#### Headers
-```
-Authorization: Bearer <access_token>
-```
-
-#### Response (204 No Content)
-
----
-
-### 6.4 평점 등록
+### 6.2 평점 등록
 
 **POST** `/api/v1/videos/{video_id}/rating`
 
@@ -783,80 +745,9 @@ Authorization: Bearer <access_token>
 
 ---
 
-## 7. 댓글 (Comments)
+## 7. 썸네일 (Thumbnails)
 
-### 7.1 댓글 목록 조회
-
-**GET** `/api/v1/videos/{video_id}/comments`
-
-비디오의 댓글 목록을 조회합니다.
-
-#### Query Parameters
-- `page` (integer, default: 1)
-- `size` (integer, default: 20)
-
-#### Response (200 OK)
-```json
-{
-    "success": true,
-    "data": {
-        "items": [
-            {
-                "id": 1,
-                "content": "Great video!",
-                "user": {
-                    "id": 1,
-                    "username": "commenter",
-                    "avatar_url": "https://example.com/avatars/1.jpg"
-                },
-                "created_at": "2024-01-01T12:00:00Z",
-                "replies_count": 3
-            }
-        ],
-        "total": 50,
-        "page": 1,
-        "size": 20
-    }
-}
-```
-
----
-
-### 7.2 댓글 작성
-
-**POST** `/api/v1/videos/{video_id}/comments`
-
-댓글을 작성합니다.
-
-#### Request Body
-```json
-{
-    "content": "This is my comment",
-    "parent_id": null
-}
-```
-
-#### Response (201 Created)
-```json
-{
-    "success": true,
-    "data": {
-        "id": 1,
-        "content": "This is my comment",
-        "user": {
-            "id": 1,
-            "username": "commenter"
-        },
-        "created_at": "2024-01-01T12:00:00Z"
-    }
-}
-```
-
----
-
-## 8. 썸네일 (Thumbnails)
-
-### 8.1 비디오 썸네일 목록 조회 (공개)
+### 7.1 비디오 썸네일 목록 조회 (공개)
 
 **GET** `/api/v1/videos/{video_id}/thumbnails`
 
@@ -885,9 +776,9 @@ Authorization: Bearer <access_token>
 
 ---
 
-## 9. 관리자 (Admin)
+## 8. 관리자 (Admin)
 
-### 9.1 대시보드 통계
+### 8.1 대시보드 통계
 
 **GET** `/api/v1/admin/dashboard/stats`
 
@@ -914,7 +805,7 @@ Authorization: Bearer <admin_access_token>
 
 ---
 
-### 9.2 비디오 썸네일 관리 (Admin 전용) ⭐ 핵심 기능
+### 8.2 비디오 썸네일 관리 (Admin 전용) ⭐ 핵심 기능
 
 #### 9.2.1 썸네일 목록 조회
 
@@ -1023,7 +914,7 @@ Content-Type: multipart/form-data
 
 ---
 
-### 9.3 태그 관리 (Admin 전용)
+### 8.3 태그 관리 (Admin 전용)
 
 #### 9.3.1 태그 생성
 

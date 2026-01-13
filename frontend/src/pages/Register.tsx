@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { useToastStore } from '../store/toastStore';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -8,29 +9,27 @@ export default function Register() {
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [validationError, setValidationError] = useState('');
   const navigate = useNavigate();
 
-  const { register, isLoading, error, clearError } = useAuthStore();
+  const { register, isLoading } = useAuthStore();
+  const toast = useToastStore();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    clearError();
-    setValidationError('');
 
     // Validation
     if (password.length < 8) {
-      setValidationError('비밀번호는 최소 8자 이상이어야 합니다');
+      toast.error('비밀번호는 최소 8자 이상이어야 합니다');
       return;
     }
 
     if (password !== confirmPassword) {
-      setValidationError('비밀번호가 일치하지 않습니다');
+      toast.error('비밀번호가 일치하지 않습니다');
       return;
     }
 
     if (username.length < 3) {
-      setValidationError('사용자명은 최소 3자 이상이어야 합니다');
+      toast.error('사용자명은 최소 3자 이상이어야 합니다');
       return;
     }
 
@@ -38,7 +37,7 @@ export default function Register() {
       await register(email, username, password, fullName || undefined);
       navigate('/');
     } catch (err) {
-      // Error is handled in the store
+      // Error is handled in the store with toast
     }
   };
 
@@ -55,12 +54,6 @@ export default function Register() {
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {(error || validationError) && (
-            <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded">
-              {error || validationError}
-            </div>
-          )}
-
           <div className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-300">

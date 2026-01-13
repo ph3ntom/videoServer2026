@@ -72,6 +72,92 @@ class VideoService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def search(
+        db: AsyncSession,
+        query_text: str,
+        skip: int = 0,
+        limit: int = 20,
+        sort_by: str = "created_at",
+        include_tags: Optional[List[int]] = None,
+        exclude_tags: Optional[List[int]] = None,
+        status: Optional[VideoStatus] = VideoStatus.READY
+    ) -> List[Video]:
+        """
+        Search videos by title, description, or uploader username with advanced tag filtering
+
+        Args:
+            query_text: Search query string
+            skip: Pagination offset
+            limit: Maximum results
+            sort_by: Sort field (created_at, view_count, title)
+            include_tags: Tag IDs that must be present (OR condition)
+            exclude_tags: Tag IDs that must NOT be present
+            status: Video status filter
+
+        Returns:
+            List of matching videos
+        """
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import or_, and_, exists
+        from app.models.associations import video_tags
+
+        # Build base query with relationships
+        query = select(Video).options(
+            selectinload(Video.uploader),
+            selectinload(Video.tags)
+        )
+
+        # Filter by status
+        if status:
+            query = query.where(Video.status == status)
+
+        # Search in title, description, and uploader username
+        if query_text:
+            search_filter = or_(
+                Video.title.ilike(f"%{query_text}%"),
+                Video.description.ilike(f"%{query_text}%"),
+                Video.uploader.has(User.username.ilike(f"%{query_text}%"))
+            )
+            query = query.where(search_filter)
+
+        # Include tags filter (video must have at least one of these tags)
+        if include_tags:
+            query = (
+                query
+                .join(video_tags, Video.id == video_tags.c.video_id)
+                .where(video_tags.c.tag_id.in_(include_tags))
+                .distinct()
+            )
+
+        # Exclude tags filter (video must NOT have any of these tags)
+        if exclude_tags:
+            # Use NOT EXISTS subquery
+            exclude_subquery = (
+                select(video_tags.c.video_id)
+                .where(
+                    and_(
+                        video_tags.c.video_id == Video.id,
+                        video_tags.c.tag_id.in_(exclude_tags)
+                    )
+                )
+            )
+            query = query.where(~exists(exclude_subquery))
+
+        # Apply sorting
+        if sort_by == "view_count":
+            query = query.order_by(desc(Video.view_count))
+        elif sort_by == "title":
+            query = query.order_by(Video.title)
+        else:  # default: created_at
+            query = query.order_by(desc(Video.created_at))
+
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
+    @staticmethod
     async def create(
         db: AsyncSession,
         video_data: VideoCreate,

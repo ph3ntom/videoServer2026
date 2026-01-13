@@ -1,41 +1,41 @@
 import { create } from 'zustand';
 import { authService, UserResponse } from '../services/auth.service';
+import { useToastStore } from './toastStore';
 
 interface AuthState {
   user: UserResponse | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  error: string | null;
 
   // Actions
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string, fullName?: string) => Promise<void>;
   logout: () => void;
   loadUser: () => Promise<void>;
-  clearError: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: authService.isAuthenticated(),
   isLoading: false,
-  error: null,
 
   login: async (email: string, password: string) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true });
     try {
       await authService.login(email, password);
       const user = await authService.getCurrentUser();
       set({ user, isAuthenticated: true, isLoading: false });
+      useToastStore.getState().success('로그인 성공!');
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Login failed';
-      set({ error: errorMessage, isLoading: false, isAuthenticated: false });
+      const errorMessage = error.response?.data?.detail || '로그인에 실패했습니다';
+      set({ isLoading: false, isAuthenticated: false });
+      useToastStore.getState().error(errorMessage);
       throw error;
     }
   },
 
   register: async (email: string, username: string, password: string, fullName?: string) => {
-    set({ isLoading: true, error: null });
+    set({ isLoading: true });
     try {
       await authService.register({
         email,
@@ -47,16 +47,19 @@ export const useAuthStore = create<AuthState>((set) => ({
       await authService.login(email, password);
       const user = await authService.getCurrentUser();
       set({ user, isAuthenticated: true, isLoading: false });
+      useToastStore.getState().success('회원가입 성공!');
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || 'Registration failed';
-      set({ error: errorMessage, isLoading: false });
+      const errorMessage = error.response?.data?.detail || '회원가입에 실패했습니다';
+      set({ isLoading: false });
+      useToastStore.getState().error(errorMessage);
       throw error;
     }
   },
 
   logout: () => {
     authService.logout();
-    set({ user: null, isAuthenticated: false, error: null });
+    set({ user: null, isAuthenticated: false });
+    useToastStore.getState().info('로그아웃되었습니다');
   },
 
   loadUser: async () => {
@@ -65,7 +68,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       return;
     }
 
-    set({ isLoading: true, error: null });
+    set({ isLoading: true });
     try {
       const user = await authService.getCurrentUser();
       set({ user, isAuthenticated: true, isLoading: false });
@@ -74,10 +77,6 @@ export const useAuthStore = create<AuthState>((set) => ({
       authService.logout();
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
-  },
-
-  clearError: () => {
-    set({ error: null });
   },
 }));
 

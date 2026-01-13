@@ -1,9 +1,9 @@
 import os
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -168,6 +168,97 @@ async def list_videos(
     return result
 
 
+@router.get("/search", response_model=List[VideoListResponse])
+async def search_videos(
+    q: str = Query(..., min_length=1, description="Search query"),
+    skip: int = Query(0, ge=0, description="Pagination offset"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum results"),
+    sort_by: str = Query("created_at", regex="^(created_at|view_count|title)$", description="Sort field"),
+    include_tags: Optional[str] = Query(None, description="Comma-separated tag IDs to include (OR condition)"),
+    exclude_tags: Optional[str] = Query(None, description="Comma-separated tag IDs to exclude"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Search videos by title, description, or uploader username with advanced tag filtering
+
+    - **q**: Search query (required, min 1 character)
+    - **skip**: Pagination offset (default: 0)
+    - **limit**: Maximum results (default: 20, max: 100)
+    - **sort_by**: Sort field - created_at (default), view_count, or title
+    - **include_tags**: Tag IDs that must be present (OR condition, e.g., "1,3,5")
+    - **exclude_tags**: Tag IDs that must NOT be present (e.g., "2,4")
+
+    Search is case-insensitive and searches in:
+    - Video title
+    - Video description
+    - Uploader username
+
+    Tag Filtering:
+    - include_tags: Videos must have AT LEAST ONE of these tags
+    - exclude_tags: Videos must NOT have ANY of these tags
+    - Both can be used together
+
+    Examples:
+    - /api/v1/videos/search?q=dance
+    - /api/v1/videos/search?q=k-pop&sort_by=view_count
+    - /api/v1/videos/search?q=직캠&include_tags=1,3
+    - /api/v1/videos/search?q=music&include_tags=1&exclude_tags=5,6
+    """
+    # Parse include_tags if provided
+    parsed_include_tags = None
+    if include_tags:
+        try:
+            parsed_include_tags = [int(tid) for tid in include_tags.split(',')]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid include_tags format. Use comma-separated integers."
+            )
+
+    # Parse exclude_tags if provided
+    parsed_exclude_tags = None
+    if exclude_tags:
+        try:
+            parsed_exclude_tags = [int(tid) for tid in exclude_tags.split(',')]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid exclude_tags format. Use comma-separated integers."
+            )
+
+    # Search videos
+    videos = await video_service.search(
+        db=db,
+        query_text=q,
+        skip=skip,
+        limit=limit,
+        sort_by=sort_by,
+        include_tags=parsed_include_tags,
+        exclude_tags=parsed_exclude_tags
+    )
+
+    # Format response
+    result = []
+    for video in videos:
+        video_dict = {
+            "id": video.id,
+            "title": video.title,
+            "description": video.description,
+            "file_size": video.file_size,
+            "thumbnail_path": video.thumbnail_path,
+            "duration": video.duration,
+            "width": video.width,
+            "height": video.height,
+            "status": video.status.value,
+            "view_count": video.view_count,
+            "created_at": video.created_at,
+            "uploader_username": video.uploader.username
+        }
+        result.append(VideoListResponse(**video_dict))
+
+    return result
+
+
 @router.get("/my-videos", response_model=List[VideoResponse])
 async def get_my_videos(
     skip: int = 0,
@@ -207,12 +298,18 @@ async def get_video(
 @router.get("/{video_id}/stream")
 async def stream_video(
     video_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Stream video file
+    Stream video file with HTTP Range Request support for seeking
 
     - **video_id**: Video ID
+
+    Supports:
+    - Range requests (206 Partial Content)
+    - Video seeking/scrubbing
+    - Bandwidth optimization
     """
     video = await video_service.get_by_id(db, video_id)
     if not video:
@@ -233,21 +330,72 @@ async def stream_video(
             detail="Video file not found"
         )
 
-    # Increment view count
-    await video_service.increment_view_count(db, video)
+    # Get file size
+    file_size = os.path.getsize(video.file_path)
 
-    # Stream video file
+    # Parse Range header
+    range_header = request.headers.get("range")
+
+    # Increment view count (only on initial request, not on range requests)
+    if not range_header:
+        await video_service.increment_view_count(db, video)
+
+    # URL encode filename for Content-Disposition header
+    encoded_filename = quote(f"{video.title}{Path(video.file_path).suffix}")
+
+    # Handle Range Request
+    if range_header:
+        # Parse range header (format: "bytes=start-end")
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0]) if range_match[0] else 0
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        end = min(end, file_size - 1)
+
+        # Calculate content length
+        content_length = end - start + 1
+
+        # Stream partial content
+        def iterfile_range():
+            with open(video.file_path, "rb") as f:
+                f.seek(start)
+                remaining = content_length
+                chunk_size = 1024 * 1024  # 1MB chunks
+
+                while remaining > 0:
+                    chunk = f.read(min(chunk_size, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        return StreamingResponse(
+            iterfile_range(),
+            status_code=206,  # Partial Content
+            media_type="video/mp4",
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(content_length),
+                "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
+            }
+        )
+
+    # No Range header - stream entire file
     def iterfile():
         with open(video.file_path, "rb") as f:
-            yield from f
-
-    # URL encode filename for Content-Disposition header (supports UTF-8 characters)
-    encoded_filename = quote(f"{video.title}{Path(video.file_path).suffix}")
+            chunk_size = 1024 * 1024  # 1MB chunks
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
 
     return StreamingResponse(
         iterfile(),
         media_type="video/mp4",
         headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
             "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
         }
     )

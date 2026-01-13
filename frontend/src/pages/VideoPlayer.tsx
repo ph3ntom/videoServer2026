@@ -4,6 +4,8 @@ import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
 import Layout from '../components/common/Layout';
 import TagSelector from '../components/tag/TagSelector';
+import VideoCard from '../components/video/VideoCard';
+import StarRating from '../components/rating/StarRating';
 import apiClient from '../services/api.client';
 import { useAuthStore } from '../store/authStore';
 
@@ -40,12 +42,39 @@ interface Tag {
   color: string;
 }
 
+interface RelatedVideo {
+  id: number;
+  title: string;
+  description: string | null;
+  file_size: number | null;
+  thumbnail_path: string | null;
+  duration: number | null;
+  width: number | null;
+  height: number | null;
+  status: string;
+  view_count: number;
+  created_at: string;
+  uploader_username: string;
+}
+
+interface RatingStats {
+  avg_rating: number;
+  rating_count: number;
+  user_rating: number | null;
+}
+
 export default function VideoPlayer() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const [video, setVideo] = useState<Video | null>(null);
   const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [relatedVideos, setRelatedVideos] = useState<RelatedVideo[]>([]);
+  const [ratingStats, setRatingStats] = useState<RatingStats>({
+    avg_rating: 0,
+    rating_count: 0,
+    user_rating: null
+  });
   const [editingTags, setEditingTags] = useState(false);
   const [tempTags, setTempTags] = useState<Tag[]>([]);
   const [savingTags, setSavingTags] = useState(false);
@@ -65,6 +94,13 @@ export default function VideoPlayer() {
       loadVideo(parseInt(id));
     }
   }, [id]);
+
+  // Reload rating stats when user changes (login/logout)
+  useEffect(() => {
+    if (video) {
+      loadRatingStats(video.id);
+    }
+  }, [user, video?.id]);
 
   // Initialize Video.js player
   useEffect(() => {
@@ -116,6 +152,7 @@ export default function VideoPlayer() {
       setVideo(response.data);
       loadThumbnails(videoId);
       loadTags(videoId);
+      loadRatingStats(videoId);
     } catch (err: any) {
       setError('비디오를 불러오는데 실패했습니다');
     } finally {
@@ -123,12 +160,78 @@ export default function VideoPlayer() {
     }
   };
 
+  const loadRatingStats = async (videoId: number) => {
+    try {
+      const response = await apiClient.get(`/videos/${videoId}/rating/stats`);
+      setRatingStats(response.data);
+
+      // If user is logged in, get their specific rating
+      if (user) {
+        try {
+          const userRatingResponse = await apiClient.get(`/videos/${videoId}/rating`);
+          setRatingStats(prev => ({
+            ...prev,
+            user_rating: userRatingResponse.data.score
+          }));
+        } catch (err: any) {
+          // User hasn't rated yet (404 is expected)
+          if (err.response?.status !== 404) {
+            console.error('Failed to load user rating:', err);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to load rating stats:', err);
+    }
+  };
+
+  const handleRate = async (score: number) => {
+    if (!video || !user) {
+      alert('로그인이 필요합니다');
+      return;
+    }
+
+    try {
+      await apiClient.post(`/videos/${video.id}/rating`, { score });
+
+      // Reload rating stats to reflect the new rating
+      await loadRatingStats(video.id);
+    } catch (err: any) {
+      alert('평가 등록에 실패했습니다');
+      throw err;
+    }
+  };
+
   const loadTags = async (videoId: number) => {
     try {
       const response = await apiClient.get(`/videos/${videoId}/tags`);
       setTags(response.data);
+      // Load related videos after tags are loaded
+      if (response.data.length > 0) {
+        loadRelatedVideos(response.data.map((tag: Tag) => tag.id));
+      }
     } catch (err: any) {
       console.error('Failed to load tags:', err);
+    }
+  };
+
+  const loadRelatedVideos = async (tagIds: number[]) => {
+    try {
+      if (tagIds.length === 0) return;
+
+      // Get videos with same tags, excluding current video
+      const response = await apiClient.get(`/videos`, {
+        params: {
+          tag_ids: tagIds.join(','),
+          limit: 6
+        }
+      });
+
+      // Filter out current video
+      const filtered = response.data.filter((v: RelatedVideo) => v.id !== parseInt(id || '0'));
+      setRelatedVideos(filtered.slice(0, 4)); // Show max 4 related videos
+    } catch (err: any) {
+      console.error('Failed to load related videos:', err);
     }
   };
 
@@ -407,6 +510,18 @@ export default function VideoPlayer() {
               </div>
             )}
           </div>
+
+          {/* Rating Section */}
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <h3 className="text-white font-semibold mb-3">평점</h3>
+            <StarRating
+              rating={ratingStats.avg_rating}
+              count={ratingStats.rating_count}
+              userRating={ratingStats.user_rating}
+              onRate={user ? handleRate : undefined}
+              readOnly={!user}
+            />
+          </div>
         </div>
 
         {/* Thumbnails Section */}
@@ -503,6 +618,18 @@ export default function VideoPlayer() {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* Related Videos Section */}
+        {relatedVideos.length > 0 && (
+          <div className="mt-12">
+            <h2 className="text-2xl font-bold text-white mb-6">관련 비디오</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {relatedVideos.map((relatedVideo) => (
+                <VideoCard key={relatedVideo.id} video={relatedVideo} />
+              ))}
+            </div>
           </div>
         )}
       </div>

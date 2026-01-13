@@ -3,6 +3,7 @@ from app.models.video import Video, VideoStatus
 from app.models.tag import Tag
 from app.models.video_thumbnail import VideoThumbnail
 from app.models.category import Category
+from app.models.rating import Rating
 from app.models.associations import video_tags
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "Tag",
     "VideoThumbnail",
     "Category",
+    "Rating",
     "video_tags",
 ]
