@@ -15,6 +15,7 @@ interface Video {
   view_count: number;
   created_at: string;
   uploader_username: string;
+  watch_progress?: number; // Progress percentage (0-100)
 }
 
 interface Thumbnail {
@@ -189,6 +190,15 @@ export default function VideoCard({ video }: VideoCardProps) {
         {video.duration && (
           <div className="absolute bottom-2 right-2 bg-black bg-opacity-75 text-white text-xs px-2 py-1 rounded">
             {formatDuration(video.duration)}
+          </div>
+        )}
+        {/* Watch progress bar */}
+        {video.watch_progress && video.watch_progress > 0 && (
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-700">
+            <div
+              className="h-full bg-red-600 transition-all"
+              style={{ width: `${video.watch_progress}%` }}
+            />
           </div>
         )}
         {/* Hover indicator */}

@@ -83,6 +83,8 @@ export default function VideoPlayer() {
   const [deleting, setDeleting] = useState(false);
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [uploadingThumbnail, setUploadingThumbnail] = useState(false);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [resumePosition, setResumePosition] = useState(0);
   const navigate = useNavigate();
   const { user} = useAuthStore();
   const videoRef = useRef<HTMLDivElement>(null);
@@ -105,6 +107,8 @@ export default function VideoPlayer() {
   // Initialize Video.js player
   useEffect(() => {
     if (!video || !videoRef.current) return;
+
+    let saveProgressInterval: NodeJS.Timeout;
 
     // Make sure Video.js player is only initialized once
     if (!playerRef.current) {
@@ -129,19 +133,107 @@ export default function VideoPlayer() {
       }));
 
       // Player ready event
-      player.ready(() => {
+      player.ready(async () => {
         console.log('Video.js player is ready');
+
+        // Load watch history and show resume prompt if available
+        if (user) {
+          try {
+            const historyResponse = await apiClient.get(`/videos/${video.id}/watch-history`);
+            const watchHistory = historyResponse.data;
+
+            // Show resume prompt if watch position is significant
+            if (watchHistory.watch_position > 5 && watchHistory.progress_percentage < 95) {
+              setResumePosition(watchHistory.watch_position);
+              setShowResumePrompt(true);
+            }
+          } catch (err: any) {
+            // No watch history (404 is expected)
+            if (err.response?.status !== 404) {
+              console.error('Failed to load watch history:', err);
+            }
+          }
+        }
+      });
+
+      // Save progress every 10 seconds while playing
+      player.on('play', () => {
+        if (user) {
+          saveProgressInterval = setInterval(() => {
+            saveWatchProgress();
+          }, 10000);
+        }
+      });
+
+      // Stop saving when paused
+      player.on('pause', () => {
+        if (saveProgressInterval) {
+          clearInterval(saveProgressInterval);
+        }
+        // Save one last time when paused
+        if (user) {
+          saveWatchProgress();
+        }
+      });
+
+      // Save when video ends
+      player.on('ended', () => {
+        if (saveProgressInterval) {
+          clearInterval(saveProgressInterval);
+        }
+        if (user) {
+          saveWatchProgress();
+        }
       });
     }
 
     // Cleanup
     return () => {
+      if (saveProgressInterval) {
+        clearInterval(saveProgressInterval);
+      }
       if (playerRef.current) {
         playerRef.current.dispose();
         playerRef.current = null;
       }
     };
-  }, [video]);
+  }, [video, user]);
+
+  const saveWatchProgress = async () => {
+    if (!playerRef.current || !video || !user) return;
+
+    try {
+      const currentTime = Math.floor(playerRef.current.currentTime());
+      const duration = Math.floor(playerRef.current.duration());
+
+      await apiClient.post(`/videos/${video.id}/watch-history`, {
+        watch_position: currentTime,
+        watch_duration: duration
+      });
+    } catch (err) {
+      console.error('Failed to save watch progress:', err);
+    }
+  };
+
+  const handleResumeVideo = () => {
+    if (playerRef.current && resumePosition > 0) {
+      playerRef.current.currentTime(resumePosition);
+      setShowResumePrompt(false);
+    }
+  };
+
+  const handleStartFromBeginning = () => {
+    if (playerRef.current) {
+      playerRef.current.currentTime(0);
+      setShowResumePrompt(false);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const loadVideo = async (videoId: number) => {
     setLoading(true);
@@ -386,8 +478,38 @@ export default function VideoPlayer() {
     <Layout>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Video Player */}
-        <div className="bg-black rounded-lg overflow-hidden mb-6">
+        <div className="bg-black rounded-lg overflow-hidden mb-6 relative">
           <div ref={videoRef} />
+
+          {/* Resume Watching Prompt */}
+          {showResumePrompt && (
+            <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
+              <div className="bg-gray-800 rounded-lg p-6 max-w-md mx-4 border border-gray-700">
+                <h3 className="text-white text-xl font-bold mb-3">
+                  이어보기
+                </h3>
+                <p className="text-gray-300 mb-6">
+                  이전에 <span className="text-indigo-400 font-semibold">{formatTime(resumePosition)}</span>까지 시청하셨습니다.
+                  <br />
+                  이어서 보시겠습니까?
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleResumeVideo}
+                    className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 font-medium transition-colors"
+                  >
+                    이어보기
+                  </button>
+                  <button
+                    onClick={handleStartFromBeginning}
+                    className="flex-1 px-4 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-600 font-medium transition-colors"
+                  >
+                    처음부터 보기
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Video Info */}

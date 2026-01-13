@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Layout from '../components/common/Layout';
 import VideoCard from '../components/video/VideoCard';
 import apiClient from '../services/api.client';
+import { useAuthStore } from '../store/authStore';
 
 interface Video {
   id: number;
@@ -17,6 +18,19 @@ interface Video {
   view_count: number;
   created_at: string;
   uploader_username: string;
+  watch_progress?: number;
+}
+
+interface ContinueWatchingItem {
+  video_id: number;
+  video_title: string;
+  video_description: string | null;
+  video_duration: number | null;
+  video_thumbnail_path: string | null;
+  uploader_username: string;
+  watch_position: number;
+  progress_percentage: number;
+  last_watched_at: string;
 }
 
 interface Tag {
@@ -28,7 +42,9 @@ interface Tag {
 }
 
 export default function Videos() {
+  const { user } = useAuthStore();
   const [videos, setVideos] = useState<Video[]>([]);
+  const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTag, setSelectedTag] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,7 +53,10 @@ export default function Videos() {
   useEffect(() => {
     loadVideos();
     loadPopularTags();
-  }, []);
+    if (user) {
+      loadContinueWatching();
+    }
+  }, [user]);
 
   useEffect(() => {
     loadVideos();
@@ -67,9 +86,35 @@ export default function Videos() {
     }
   };
 
+  const loadContinueWatching = async () => {
+    try {
+      const response = await apiClient.get('/videos/continue-watching?limit=6');
+      setContinueWatching(response.data);
+    } catch (err: any) {
+      console.error('Failed to load continue watching:', err);
+    }
+  };
+
   const handleTagClick = (tagId: number) => {
     setSelectedTag(selectedTag === tagId ? null : tagId);
   };
+
+  // Transform continue watching to Video format
+  const continueWatchingVideos: Video[] = continueWatching.map(item => ({
+    id: item.video_id,
+    title: item.video_title,
+    description: item.video_description,
+    file_size: null,
+    thumbnail_path: item.video_thumbnail_path,
+    duration: item.video_duration,
+    width: null,
+    height: null,
+    status: 'ready',
+    view_count: 0,
+    created_at: item.last_watched_at,
+    uploader_username: item.uploader_username,
+    watch_progress: item.progress_percentage
+  }));
 
 
   return (
@@ -122,11 +167,28 @@ export default function Videos() {
           </div>
         )}
 
+        {/* Continue Watching Section */}
+        {user && continueWatchingVideos.length > 0 && (
+          <div className="mb-12">
+            <h2 className="text-2xl font-bold text-white mb-4">이어보기</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {continueWatchingVideos.map((video) => (
+                <VideoCard key={video.id} video={video} />
+              ))}
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded mb-6">
             {error}
           </div>
         )}
+
+        {/* All Videos Section */}
+        <h2 className="text-2xl font-bold text-white mb-6">
+          {selectedTag ? '필터링된 비디오' : '모든 비디오'}
+        </h2>
 
         {loading ? (
           <div className="flex justify-center items-center py-20">
