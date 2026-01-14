@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1 import auth, videos, tags, ratings, watch_history
+from app.api.v1 import auth, videos, tags, ratings, watch_history, statistics
 
 api_router = APIRouter()
 
@@ -17,3 +17,6 @@ api_router.include_router(ratings.router, prefix="/videos", tags=["Ratings"])
 
 # Include watch history routes
 api_router.include_router(watch_history.router, prefix="/videos", tags=["Watch History"])
+
+# Include statistics routes
+api_router.include_router(statistics.router, prefix="/statistics", tags=["Statistics"])

@@ -33,6 +33,12 @@ interface ContinueWatchingItem {
   last_watched_at: string;
 }
 
+interface TopRatedVideo {
+  video: Video;
+  avg_rating: number;
+  rating_count: number;
+}
+
 interface Tag {
   id: number;
   name: string;
@@ -45,6 +51,8 @@ export default function Videos() {
   const { user } = useAuthStore();
   const [videos, setVideos] = useState<Video[]>([]);
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
+  const [popularVideos, setPopularVideos] = useState<Video[]>([]);
+  const [topRatedVideos, setTopRatedVideos] = useState<TopRatedVideo[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTag, setSelectedTag] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,6 +61,8 @@ export default function Videos() {
   useEffect(() => {
     loadVideos();
     loadPopularTags();
+    loadPopularVideos();
+    loadTopRatedVideos();
     if (user) {
       loadContinueWatching();
     }
@@ -92,6 +102,24 @@ export default function Videos() {
       setContinueWatching(response.data);
     } catch (err: any) {
       console.error('Failed to load continue watching:', err);
+    }
+  };
+
+  const loadPopularVideos = async () => {
+    try {
+      const response = await apiClient.get('/statistics/popular?limit=8');
+      setPopularVideos(response.data);
+    } catch (err: any) {
+      console.error('Failed to load popular videos:', err);
+    }
+  };
+
+  const loadTopRatedVideos = async () => {
+    try {
+      const response = await apiClient.get('/statistics/top-rated?limit=8&min_ratings=1');
+      setTopRatedVideos(response.data);
+    } catch (err: any) {
+      console.error('Failed to load top rated videos:', err);
     }
   };
 
@@ -162,6 +190,43 @@ export default function Videos() {
                 >
                   {tag.name} ({tag.video_count})
                 </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Popular Videos Section */}
+        {popularVideos.length > 0 && (
+          <div className="mb-12">
+            <div className="flex items-center gap-2 mb-4">
+              <h2 className="text-2xl font-bold text-white">인기 비디오</h2>
+              <span className="text-sm text-gray-400">조회수 기준</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {popularVideos.map((video) => (
+                <VideoCard key={video.id} video={video} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Top Rated Videos Section */}
+        {topRatedVideos.length > 0 && (
+          <div className="mb-12">
+            <div className="flex items-center gap-2 mb-4">
+              <h2 className="text-2xl font-bold text-white">높은 평점</h2>
+              <span className="text-sm text-gray-400">평균 평점 기준</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {topRatedVideos.map((item) => (
+                <div key={item.video.id} className="relative">
+                  <VideoCard video={item.video} />
+                  <div className="absolute top-2 right-2 bg-yellow-500 text-gray-900 px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1">
+                    <span>★</span>
+                    <span>{item.avg_rating.toFixed(1)}</span>
+                    <span className="text-gray-700">({item.rating_count})</span>
+                  </div>
+                </div>
               ))}
             </div>
           </div>

@@ -295,6 +295,29 @@ async def get_video(
     return video
 
 
+@router.post("/{video_id}/view", status_code=status.HTTP_204_NO_CONTENT)
+async def increment_view(
+    video_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Increment view count for a video
+
+    - **video_id**: Video ID
+
+    This endpoint should be called once when the video player starts playing.
+    """
+    video = await video_service.get_by_id(db, video_id)
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    await video_service.increment_view_count(db, video)
+    return None
+
+
 @router.get("/{video_id}/stream")
 async def stream_video(
     video_id: int,

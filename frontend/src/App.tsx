@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Home from './pages/Home'
@@ -10,8 +11,16 @@ import SearchPage from './pages/SearchPage'
 import ProfilePage from './pages/ProfilePage'
 import PrivateRoute from './components/common/PrivateRoute'
 import ErrorBoundary from './components/common/ErrorBoundary'
+import { useAuthStore } from './store/authStore'
 
 function App() {
+  const loadUser = useAuthStore((state) => state.loadUser)
+
+  // Load user on app mount (page refresh)
+  useEffect(() => {
+    loadUser()
+  }, [loadUser])
+
   return (
     <ErrorBoundary>
       <Router>

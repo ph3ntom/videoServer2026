@@ -91,6 +91,11 @@ export default function VideoPlayer() {
   const playerRef = useRef<Player | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Debug: Log user state changes
+  useEffect(() => {
+    console.log('User state changed:', user);
+  }, [user]);
+
   useEffect(() => {
     if (id) {
       loadVideo(parseInt(id));
@@ -103,6 +108,46 @@ export default function VideoPlayer() {
       loadRatingStats(video.id);
     }
   }, [user, video?.id]);
+
+  // Check watch history and show resume prompt
+  useEffect(() => {
+    const checkWatchHistory = async () => {
+      if (!video || !user) {
+        console.log('Watch history check skipped:', { hasVideo: !!video, hasUser: !!user });
+        return;
+      }
+
+      console.log('Checking watch history for video:', video.id);
+
+      try {
+        const historyResponse = await apiClient.get(`/videos/${video.id}/watch-history`);
+        const watchHistory = historyResponse.data;
+
+        console.log('Watch history loaded:', watchHistory);
+
+        // Show resume prompt if watch position is significant
+        if (watchHistory.watch_position > 5 && watchHistory.progress_percentage < 95) {
+          console.log('Showing resume prompt at position:', watchHistory.watch_position);
+          setResumePosition(watchHistory.watch_position);
+          setShowResumePrompt(true);
+        } else {
+          console.log('Resume conditions not met:', {
+            position: watchHistory.watch_position,
+            progress: watchHistory.progress_percentage
+          });
+        }
+      } catch (err: any) {
+        // No watch history (404 is expected)
+        if (err.response?.status !== 404) {
+          console.error('Failed to load watch history:', err);
+        } else {
+          console.log('No watch history found (404)');
+        }
+      }
+    };
+
+    checkWatchHistory();
+  }, [video?.id, user]);
 
   // Initialize Video.js player
   useEffect(() => {
@@ -136,23 +181,11 @@ export default function VideoPlayer() {
       player.ready(async () => {
         console.log('Video.js player is ready');
 
-        // Load watch history and show resume prompt if available
-        if (user) {
-          try {
-            const historyResponse = await apiClient.get(`/videos/${video.id}/watch-history`);
-            const watchHistory = historyResponse.data;
-
-            // Show resume prompt if watch position is significant
-            if (watchHistory.watch_position > 5 && watchHistory.progress_percentage < 95) {
-              setResumePosition(watchHistory.watch_position);
-              setShowResumePrompt(true);
-            }
-          } catch (err: any) {
-            // No watch history (404 is expected)
-            if (err.response?.status !== 404) {
-              console.error('Failed to load watch history:', err);
-            }
-          }
+        // Increment view count
+        try {
+          await apiClient.post(`/videos/${video.id}/view`);
+        } catch (err) {
+          console.error('Failed to increment view count:', err);
         }
       });
 

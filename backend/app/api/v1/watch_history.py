@@ -48,10 +48,6 @@ async def save_watch_progress(
             watch_data=watch_data
         )
 
-        # Add progress_percentage to response
-        if hasattr(history, 'progress_percentage'):
-            history.progress_percentage = history.progress_percentage
-
         return history
     except ValueError as e:
         raise HTTPException(
