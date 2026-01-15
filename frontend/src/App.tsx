@@ -1,20 +1,29 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, lazy, Suspense } from 'react'
 import Login from './pages/Login'
 import Register from './pages/Register'
-import Home from './pages/Home'
 import VerifyEmail from './pages/VerifyEmail'
-import Videos from './pages/Videos'
-import VideoPlayer from './pages/VideoPlayer'
-import UploadVideo from './pages/UploadVideo'
-import SearchPage from './pages/SearchPage'
-import ProfilePage from './pages/ProfilePage'
-import PopularVideos from './pages/PopularVideos'
-import TopRatedVideos from './pages/TopRatedVideos'
-import AllVideos from './pages/AllVideos'
 import PrivateRoute from './components/common/PrivateRoute'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { useAuthStore } from './store/authStore'
+
+// Lazy load protected pages for better initial load performance
+const Home = lazy(() => import('./pages/Home'))
+const Videos = lazy(() => import('./pages/Videos'))
+const VideoPlayer = lazy(() => import('./pages/VideoPlayer'))
+const UploadVideo = lazy(() => import('./pages/UploadVideo'))
+const SearchPage = lazy(() => import('./pages/SearchPage'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
+const PopularVideos = lazy(() => import('./pages/PopularVideos'))
+const TopRatedVideos = lazy(() => import('./pages/TopRatedVideos'))
+const AllVideos = lazy(() => import('./pages/AllVideos'))
+
+// Loading component for Suspense fallback
+const PageLoader = () => (
+  <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
+  </div>
+)
 
 function App() {
   const loadUser = useAuthStore((state) => state.loadUser)
@@ -27,21 +36,22 @@ function App() {
   return (
     <ErrorBoundary>
       <Router>
-        <Routes>
-          {/* Public routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/verify-email" element={<VerifyEmail />} />
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
 
-          {/* Protected routes */}
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <Home />
-              </PrivateRoute>
-            }
-          />
+            {/* Protected routes - lazy loaded */}
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <Home />
+                </PrivateRoute>
+              }
+            />
           <Route
             path="/videos"
             element={
@@ -107,9 +117,10 @@ function App() {
             }
           />
 
-          {/* Catch all - redirect to home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Catch all - redirect to home */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </Router>
     </ErrorBoundary>
   )

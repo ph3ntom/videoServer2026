@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { Link } from 'react-router-dom';
 import apiClient from '../../services/api.client';
 
@@ -31,7 +31,7 @@ interface VideoCardProps {
   video: Video;
 }
 
-export default function VideoCard({ video }: VideoCardProps) {
+function VideoCard({ video }: VideoCardProps) {
   const [thumbnails, setThumbnails] = useState<Thumbnail[]>([]);
   const [currentThumbnailIndex, setCurrentThumbnailIndex] = useState(0);
   const [isHovering, setIsHovering] = useState(false);
@@ -87,7 +87,7 @@ export default function VideoCard({ video }: VideoCardProps) {
   };
 
   // Handle mouse enter with debounce
-  const handleMouseEnter = () => {
+  const handleMouseEnter = useCallback(() => {
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
     }
@@ -102,10 +102,10 @@ export default function VideoCard({ video }: VideoCardProps) {
         }, 1000);
       }
     }, 300);
-  };
+  }, [thumbnails.length]);
 
   // Handle mouse leave
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
     // Clear debounce timeout
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
@@ -120,7 +120,7 @@ export default function VideoCard({ video }: VideoCardProps) {
 
     setIsHovering(false);
     setCurrentThumbnailIndex(0);
-  };
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -134,29 +134,29 @@ export default function VideoCard({ video }: VideoCardProps) {
     };
   }, []);
 
-  const formatDuration = (seconds: number | null) => {
+  const formatDuration = useCallback((seconds: number | null) => {
     if (!seconds) return '알 수 없음';
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  }, []);
 
-  const formatDate = (dateString: string) => {
+  const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('ko-KR', {
       year: 'numeric',
       month: 'long',
       day: 'numeric'
     });
-  };
+  }, []);
 
-  const getThumbnailUrl = () => {
+  const getThumbnailUrl = useMemo(() => {
     if (isHovering && thumbnails.length > 0) {
       const thumbnail = thumbnails[currentThumbnailIndex];
       return `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/thumbnails/${thumbnail.id}/image`;
     }
     return `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/thumbnail`;
-  };
+  }, [isHovering, thumbnails, currentThumbnailIndex, video.id]);
 
   return (
     <Link
@@ -170,7 +170,7 @@ export default function VideoCard({ video }: VideoCardProps) {
       <div className="aspect-video bg-gray-700 flex items-center justify-center relative overflow-hidden">
         {video.thumbnail_path ? (
           <img
-            src={getThumbnailUrl()}
+            src={getThumbnailUrl}
             alt={video.title}
             className="w-full h-full object-cover transition-opacity duration-300"
             style={{ opacity: 1 }}
@@ -240,3 +240,6 @@ export default function VideoCard({ video }: VideoCardProps) {
     </Link>
   );
 }
+
+// Memoize the component to prevent unnecessary re-renders
+export default memo(VideoCard);
