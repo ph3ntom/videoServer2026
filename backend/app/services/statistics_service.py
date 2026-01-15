@@ -8,7 +8,8 @@ from app.models.rating import Rating
 
 async def get_popular_videos(
     db: AsyncSession,
-    limit: int = 10
+    limit: int = 10,
+    skip: int = 0
 ) -> List[Video]:
     """
     Get most popular videos by view count.
@@ -16,6 +17,7 @@ async def get_popular_videos(
     Args:
         db: Database session
         limit: Maximum number of videos to return (default: 10)
+        skip: Number of videos to skip for pagination (default: 0)
 
     Returns:
         List of Video objects ordered by view count (descending)
@@ -25,6 +27,7 @@ async def get_popular_videos(
         .options(joinedload(Video.uploader))
         .where(Video.status == "ready")
         .order_by(desc(Video.view_count))
+        .offset(skip)
         .limit(limit)
     )
 
@@ -36,6 +39,7 @@ async def get_popular_videos(
 async def get_top_rated_videos(
     db: AsyncSession,
     limit: int = 10,
+    skip: int = 0,
     min_ratings: int = 5
 ) -> List[dict]:
     """
@@ -44,6 +48,7 @@ async def get_top_rated_videos(
     Args:
         db: Database session
         limit: Maximum number of videos to return (default: 10)
+        skip: Number of videos to skip for pagination (default: 0)
         min_ratings: Minimum number of ratings required (default: 5)
 
     Returns:
@@ -72,6 +77,7 @@ async def get_top_rated_videos(
         .options(joinedload(Video.uploader))
         .where(Video.status == "ready")
         .order_by(desc(rating_stats.c.avg_rating))
+        .offset(skip)
         .limit(limit)
     )
 

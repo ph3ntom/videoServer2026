@@ -33,20 +33,22 @@ class StatisticsSummaryResponse(BaseModel):
 
 @router.get("/popular", response_model=List[VideoListResponse])
 async def get_popular_videos(
-    limit: int = Query(default=10, ge=1, le=50, description="Number of videos to return"),
+    limit: int = Query(default=10, ge=1, le=100, description="Number of videos to return"),
+    skip: int = Query(default=0, ge=0, description="Number of videos to skip for pagination"),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get most popular videos by view count.
 
     Args:
-        limit: Maximum number of videos to return (1-50, default: 10)
+        limit: Maximum number of videos to return (1-100, default: 10)
+        skip: Number of videos to skip for pagination (default: 0)
         db: Database session
 
     Returns:
         List of popular videos ordered by view count
     """
-    videos = await statistics_service.get_popular_videos(db, limit=limit)
+    videos = await statistics_service.get_popular_videos(db, limit=limit, skip=skip)
 
     # Convert to response format
     return [
@@ -70,7 +72,8 @@ async def get_popular_videos(
 
 @router.get("/top-rated", response_model=List[TopRatedVideoResponse])
 async def get_top_rated_videos(
-    limit: int = Query(default=10, ge=1, le=50, description="Number of videos to return"),
+    limit: int = Query(default=10, ge=1, le=100, description="Number of videos to return"),
+    skip: int = Query(default=0, ge=0, description="Number of videos to skip for pagination"),
     min_ratings: int = Query(default=5, ge=1, le=100, description="Minimum number of ratings required"),
     db: AsyncSession = Depends(get_db)
 ):
@@ -78,7 +81,8 @@ async def get_top_rated_videos(
     Get top rated videos with minimum rating threshold.
 
     Args:
-        limit: Maximum number of videos to return (1-50, default: 10)
+        limit: Maximum number of videos to return (1-100, default: 10)
+        skip: Number of videos to skip for pagination (default: 0)
         min_ratings: Minimum number of ratings required (1-100, default: 5)
         db: Database session
 
@@ -88,6 +92,7 @@ async def get_top_rated_videos(
     top_rated = await statistics_service.get_top_rated_videos(
         db,
         limit=limit,
+        skip=skip,
         min_ratings=min_ratings
     )
 

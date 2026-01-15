@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db, get_current_active_user
 from app.models.user import User
 from app.models.video import VideoStatus
-from app.schemas.video import VideoCreate, VideoUpdate, VideoResponse, VideoListResponse
+from app.schemas.video import VideoCreate, VideoUpdate, VideoResponse, VideoListResponse, VideoListPaginatedResponse
 from app.schemas.thumbnail import ThumbnailResponse, ThumbnailSelect
 from app.schemas.tag import TagSimple, VideoTagCreate, VideoTagUpdate
 from app.services.video_service import video_service
@@ -166,6 +166,82 @@ async def list_videos(
         result.append(VideoListResponse(**video_dict))
 
     return result
+
+
+@router.get("/paginated", response_model=VideoListPaginatedResponse)
+async def list_videos_paginated(
+    page: int = Query(1, ge=1, description="Page number (starting from 1)"),
+    page_size: int = Query(20, ge=1, le=100, description="Number of videos per page"),
+    tag_ids: str = Query(None, description="Comma-separated tag IDs to filter by"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get paginated list of all ready videos with total count
+
+    - **page**: Page number (starting from 1)
+    - **page_size**: Number of videos per page
+    - **tag_ids**: Comma-separated tag IDs (e.g., "1,2,3")
+    """
+    # Parse tag IDs if provided
+    tag_id_list = None
+    if tag_ids:
+        try:
+            tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',')]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tag_ids format. Use comma-separated integers."
+            )
+
+    # Calculate skip value
+    skip = (page - 1) * page_size
+
+    # Get total count first
+    total = await video_service.count_all(
+        db,
+        status=VideoStatus.READY,
+        tag_ids=tag_id_list
+    )
+
+    # Then get videos
+    videos = await video_service.get_all(
+        db,
+        skip=skip,
+        limit=page_size,
+        status=VideoStatus.READY,
+        tag_ids=tag_id_list
+    )
+
+    # Transform to include uploader username
+    items = []
+    for video in videos:
+        video_dict = {
+            "id": video.id,
+            "title": video.title,
+            "description": video.description,
+            "file_size": video.file_size,
+            "thumbnail_path": video.thumbnail_path,
+            "duration": video.duration,
+            "width": video.width,
+            "height": video.height,
+            "status": video.status.value,
+            "view_count": video.view_count,
+            "created_at": video.created_at,
+            "uploader_username": video.uploader.username
+        }
+        items.append(VideoListResponse(**video_dict))
+
+    # Calculate total pages
+    import math
+    total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+    return VideoListPaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages
+    )
 
 
 @router.get("/search", response_model=List[VideoListResponse])

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -56,5 +56,16 @@ class VideoListResponse(BaseModel):
     view_count: int
     created_at: datetime
     uploader_username: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VideoListPaginatedResponse(BaseModel):
+    """Schema for paginated video list response"""
+    items: List[VideoListResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
     model_config = ConfigDict(from_attributes=True)

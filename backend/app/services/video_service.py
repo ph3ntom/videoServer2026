@@ -4,7 +4,7 @@ import json
 from typing import List, Optional
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from fastapi import UploadFile
 
 from app.models.video import Video, VideoStatus
@@ -52,6 +52,32 @@ class VideoService:
         query = query.order_by(desc(Video.created_at)).offset(skip).limit(limit)
         result = await db.execute(query)
         return list(result.scalars().all())
+
+    @staticmethod
+    async def count_all(
+        db: AsyncSession,
+        status: Optional[VideoStatus] = VideoStatus.READY,
+        tag_ids: Optional[List[int]] = None
+    ) -> int:
+        """Count all videos with optional tag filtering"""
+        from app.models.associations import video_tags
+
+        query = select(func.count(Video.id))
+
+        if status:
+            query = query.where(Video.status == status)
+
+        # Filter by tags if provided
+        if tag_ids:
+            query = (
+                query
+                .join(video_tags, Video.id == video_tags.c.video_id)
+                .where(video_tags.c.tag_id.in_(tag_ids))
+                .distinct()
+            )
+
+        result = await db.execute(query)
+        return result.scalar() or 0
 
     @staticmethod
     async def get_by_user(

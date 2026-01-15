@@ -9,6 +9,9 @@ import VideoPlayer from './pages/VideoPlayer'
 import UploadVideo from './pages/UploadVideo'
 import SearchPage from './pages/SearchPage'
 import ProfilePage from './pages/ProfilePage'
+import PopularVideos from './pages/PopularVideos'
+import TopRatedVideos from './pages/TopRatedVideos'
+import AllVideos from './pages/AllVideos'
 import PrivateRoute from './components/common/PrivateRoute'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { useAuthStore } from './store/authStore'
@@ -44,6 +47,30 @@ function App() {
             element={
               <PrivateRoute>
                 <Videos />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/videos/popular"
+            element={
+              <PrivateRoute>
+                <PopularVideos />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/videos/top-rated"
+            element={
+              <PrivateRoute>
+                <TopRatedVideos />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/videos/all"
+            element={
+              <PrivateRoute>
+                <AllVideos />
               </PrivateRoute>
             }
           />

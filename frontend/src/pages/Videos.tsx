@@ -77,7 +77,7 @@ export default function Videos() {
     setError('');
 
     try {
-      const params = selectedTag ? `?tag_ids=${selectedTag}` : '';
+      const params = selectedTag ? `?tag_ids=${selectedTag}&limit=4` : '?limit=4';
       const response = await apiClient.get(`/videos/${params}`);
       setVideos(response.data);
     } catch (err: any) {
@@ -107,7 +107,7 @@ export default function Videos() {
 
   const loadPopularVideos = async () => {
     try {
-      const response = await apiClient.get('/statistics/popular?limit=8');
+      const response = await apiClient.get('/statistics/popular?limit=4');
       setPopularVideos(response.data);
     } catch (err: any) {
       console.error('Failed to load popular videos:', err);
@@ -116,7 +116,7 @@ export default function Videos() {
 
   const loadTopRatedVideos = async () => {
     try {
-      const response = await apiClient.get('/statistics/top-rated?limit=8&min_ratings=1');
+      const response = await apiClient.get('/statistics/top-rated?limit=4&min_ratings=1');
       setTopRatedVideos(response.data);
     } catch (err: any) {
       console.error('Failed to load top rated videos:', err);
@@ -198,9 +198,17 @@ export default function Videos() {
         {/* Popular Videos Section */}
         {popularVideos.length > 0 && (
           <div className="mb-12">
-            <div className="flex items-center gap-2 mb-4">
-              <h2 className="text-2xl font-bold text-white">인기 비디오</h2>
-              <span className="text-sm text-gray-400">조회수 기준</span>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-bold text-white">인기 비디오</h2>
+                <span className="text-sm text-gray-400">조회수 기준</span>
+              </div>
+              <Link
+                to="/videos/popular"
+                className="text-indigo-400 hover:text-indigo-300 text-sm flex items-center gap-1"
+              >
+                더보기 →
+              </Link>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {popularVideos.map((video) => (
@@ -213,9 +221,17 @@ export default function Videos() {
         {/* Top Rated Videos Section */}
         {topRatedVideos.length > 0 && (
           <div className="mb-12">
-            <div className="flex items-center gap-2 mb-4">
-              <h2 className="text-2xl font-bold text-white">높은 평점</h2>
-              <span className="text-sm text-gray-400">평균 평점 기준</span>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-bold text-white">높은 평점</h2>
+                <span className="text-sm text-gray-400">평균 평점 기준</span>
+              </div>
+              <Link
+                to="/videos/top-rated"
+                className="text-indigo-400 hover:text-indigo-300 text-sm flex items-center gap-1"
+              >
+                더보기 →
+              </Link>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {topRatedVideos.map((item) => (
@@ -251,9 +267,19 @@ export default function Videos() {
         )}
 
         {/* All Videos Section */}
-        <h2 className="text-2xl font-bold text-white mb-6">
-          {selectedTag ? '필터링된 비디오' : '모든 비디오'}
-        </h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-white">
+            {selectedTag ? '필터링된 비디오' : '모든 비디오'}
+          </h2>
+          {!selectedTag && (
+            <Link
+              to="/videos/all"
+              className="text-indigo-400 hover:text-indigo-300 text-sm flex items-center gap-1"
+            >
+              더보기 →
+            </Link>
+          )}
+        </div>
 
         {loading ? (
           <div className="flex justify-center items-center py-20">
