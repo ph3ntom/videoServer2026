@@ -28,11 +28,21 @@ class VideoService:
         skip: int = 0,
         limit: int = 20,
         status: Optional[VideoStatus] = VideoStatus.READY,
-        tag_ids: Optional[List[int]] = None
+        tag_ids: Optional[List[int]] = None,
+        sort_by: str = "created_at",
+        order: str = "desc"
     ) -> List[Video]:
-        """Get all videos with optional tag filtering"""
+        """
+        Get all videos with optional tag filtering and sorting
+
+        Args:
+            sort_by: created_at, view_count, rating
+            order: asc, desc
+        """
         from sqlalchemy.orm import selectinload
+        from sqlalchemy import asc
         from app.models.associations import video_tags
+        from app.models.rating import Rating
 
         query = select(Video).options(selectinload(Video.uploader), selectinload(Video.tags))
 
@@ -49,7 +59,39 @@ class VideoService:
                 .distinct()
             )
 
-        query = query.order_by(desc(Video.created_at)).offset(skip).limit(limit)
+        # Apply sorting
+        if sort_by == "rating":
+            # Subquery to calculate average rating per video
+            rating_subquery = (
+                select(
+                    Rating.video_id,
+                    func.avg(Rating.score).label('avg_rating')
+                )
+                .group_by(Rating.video_id)
+                .subquery()
+            )
+
+            # Left join to include videos without ratings
+            query = query.outerjoin(
+                rating_subquery,
+                Video.id == rating_subquery.c.video_id
+            )
+
+            # Use coalesce to handle NULL ratings (videos without any ratings)
+            # They will be sorted last when descending, first when ascending
+            sort_column = func.coalesce(rating_subquery.c.avg_rating, 0)
+        elif sort_by == "view_count":
+            sort_column = Video.view_count
+        else:  # created_at
+            sort_column = Video.created_at
+
+        # Apply order
+        if order == "asc":
+            query = query.order_by(asc(sort_column))
+        else:
+            query = query.order_by(desc(sort_column))
+
+        query = query.offset(skip).limit(limit)
         result = await db.execute(query)
         return list(result.scalars().all())
 

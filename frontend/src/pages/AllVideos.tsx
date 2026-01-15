@@ -36,10 +36,11 @@ export default function AllVideos() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
+  const [sortBy, setSortBy] = useState<'created_at' | 'view_count' | 'rating'>('created_at');
 
   useEffect(() => {
     loadVideos();
-  }, [currentPage]);
+  }, [currentPage, sortBy]);
 
   const loadVideos = async () => {
     setLoading(true);
@@ -47,7 +48,7 @@ export default function AllVideos() {
 
     try {
       const response = await apiClient.get<PaginatedResponse>(
-        `/videos/paginated?page=${currentPage}&page_size=${ITEMS_PER_PAGE}`
+        `/videos/paginated?page=${currentPage}&page_size=${ITEMS_PER_PAGE}&sort_by=${sortBy}&order=desc`
       );
       setVideos(response.data.items);
       setTotal(response.data.total);
@@ -119,6 +120,22 @@ export default function AllVideos() {
               <p className="text-gray-400 mt-2">
                 전체 {total.toLocaleString()}개의 비디오
               </p>
+            </div>
+            {/* Sort Dropdown */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-400">정렬:</label>
+              <select
+                value={sortBy}
+                onChange={(e) => {
+                  setSortBy(e.target.value as 'created_at' | 'view_count' | 'rating');
+                  setCurrentPage(1); // Reset to first page when sorting changes
+                }}
+                className="bg-gray-800 text-white px-4 py-2 rounded-md border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="created_at">최신순</option>
+                <option value="view_count">조회수순</option>
+                <option value="rating">평점순</option>
+              </select>
             </div>
           </div>
         </div>

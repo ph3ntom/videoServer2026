@@ -173,6 +173,8 @@ async def list_videos_paginated(
     page: int = Query(1, ge=1, description="Page number (starting from 1)"),
     page_size: int = Query(20, ge=1, le=100, description="Number of videos per page"),
     tag_ids: str = Query(None, description="Comma-separated tag IDs to filter by"),
+    sort_by: str = Query("created_at", regex="^(created_at|view_count|rating)$", description="Sort field"),
+    order: str = Query("desc", regex="^(asc|desc)$", description="Sort order"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -181,6 +183,8 @@ async def list_videos_paginated(
     - **page**: Page number (starting from 1)
     - **page_size**: Number of videos per page
     - **tag_ids**: Comma-separated tag IDs (e.g., "1,2,3")
+    - **sort_by**: Sort field (created_at, view_count, rating)
+    - **order**: Sort order (asc, desc)
     """
     # Parse tag IDs if provided
     tag_id_list = None
@@ -209,7 +213,9 @@ async def list_videos_paginated(
         skip=skip,
         limit=page_size,
         status=VideoStatus.READY,
-        tag_ids=tag_id_list
+        tag_ids=tag_id_list,
+        sort_by=sort_by,
+        order=order
     )
 
     # Transform to include uploader username
