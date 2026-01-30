@@ -16,6 +16,7 @@ from app.schemas.tag import TagSimple, VideoTagCreate, VideoTagUpdate
 from app.services.video_service import video_service
 from app.services.thumbnail_service import thumbnail_service
 from app.services.tag_service import tag_service
+from app.services import transcoding_service, hls_service
 from app.core.config import settings
 
 router = APIRouter()
@@ -404,17 +405,20 @@ async def increment_view(
 async def stream_video(
     video_id: int,
     request: Request,
+    quality: transcoding_service.QualityType = Query("original", description="Video quality (480p, 720p, 1080p, 4k, original)"),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Stream video file with HTTP Range Request support for seeking
+    Stream video file with HTTP Range Request support for seeking and quality selection
 
     - **video_id**: Video ID
+    - **quality**: Video quality (480p, 720p, 1080p, 4k, original)
 
     Supports:
     - Range requests (206 Partial Content)
     - Video seeking/scrubbing
     - Bandwidth optimization
+    - Multiple quality options (on-demand transcoding with caching)
     """
     video = await video_service.get_by_id(db, video_id)
     if not video:
@@ -435,8 +439,23 @@ async def stream_video(
             detail="Video file not found"
         )
 
+    # Get video file for requested quality (on-demand transcoding with caching)
+    # transcode_in_background=True means start transcoding in background and return original
+    # User will get transcoded version on next request after transcoding completes
+    video_file_path = await transcoding_service.get_video_for_quality(
+        original_path=video.file_path,
+        quality=quality,
+        transcode_in_background=True  # Background transcoding for better UX
+    )
+
+    if not video_file_path or not os.path.exists(video_file_path):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to prepare video file"
+        )
+
     # Get file size
-    file_size = os.path.getsize(video.file_path)
+    file_size = os.path.getsize(video_file_path)
 
     # Parse Range header
     range_header = request.headers.get("range")
@@ -461,7 +480,7 @@ async def stream_video(
 
         # Stream partial content
         def iterfile_range():
-            with open(video.file_path, "rb") as f:
+            with open(video_file_path, "rb") as f:
                 f.seek(start)
                 remaining = content_length
                 chunk_size = 1024 * 1024  # 1MB chunks
@@ -487,7 +506,7 @@ async def stream_video(
 
     # No Range header - stream entire file
     def iterfile():
-        with open(video.file_path, "rb") as f:
+        with open(video_file_path, "rb") as f:
             chunk_size = 1024 * 1024  # 1MB chunks
             while True:
                 chunk = f.read(chunk_size)
@@ -504,6 +523,46 @@ async def stream_video(
             "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
         }
     )
+
+
+@router.get("/{video_id}/qualities")
+async def get_video_qualities(
+    video_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get list of available quality options for a video.
+
+    Returns:
+    - original: Always available
+    - 480p, 720p, 1080p, 4k: Available if transcoded cache exists
+
+    Args:
+        video_id: Video ID
+
+    Returns:
+        List of available quality strings
+    """
+    video = await video_service.get_by_id(db, video_id)
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    if not os.path.exists(video.file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video file not found"
+        )
+
+    # Get available qualities
+    qualities = transcoding_service.get_available_qualities(video.file_path)
+
+    return {
+        "video_id": video_id,
+        "available_qualities": qualities
+    }
 
 
 @router.put("/{video_id}", response_model=VideoResponse)
@@ -967,3 +1026,220 @@ async def remove_tag_from_video(
 
     tags = await tag_service.remove_tags_from_video(db, video, [tag_id])
     return tags
+
+
+# ============================================================================
+# HLS (HTTP Live Streaming) Endpoints
+# ============================================================================
+
+@router.post("/{video_id}/convert-hls", status_code=status.HTTP_202_ACCEPTED)
+async def convert_video_to_hls(
+    video_id: int,
+    qualities: Optional[List[str]] = Query(None, description="Qualities to generate (default: 480p, 720p, 1080p)"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Convert video to HLS format with multiple quality levels.
+    This is an async operation that runs in the background.
+
+    - **video_id**: Video ID
+    - **qualities**: Optional list of qualities (480p, 720p, 1080p, 4k)
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    # Check if video file exists
+    if not os.path.exists(video.file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video file not found"
+        )
+
+    # Check if already converted
+    if hls_service.is_hls_available(video.file_path):
+        return {
+            "message": "HLS conversion already completed",
+            "available_qualities": hls_service.get_available_hls_qualities(video.file_path)
+        }
+
+    # Start background conversion
+    import asyncio
+    asyncio.create_task(hls_service.convert_video_to_hls(video.file_path, qualities))
+
+    return {
+        "message": "HLS conversion started",
+        "video_id": video_id,
+        "status": "processing"
+    }
+
+
+@router.get("/{video_id}/hls/master.m3u8")
+async def get_hls_master_playlist(
+    video_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get HLS master playlist for a video.
+    This playlist references all available quality levels.
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    master_path = hls_service.get_master_playlist_path(video.file_path)
+
+    if not os.path.exists(master_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="HLS conversion not available. Use /convert-hls endpoint first."
+        )
+
+    # Return m3u8 file
+    with open(master_path, 'r') as f:
+        content = f.read()
+
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.apple.mpegurl",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+
+@router.get("/{video_id}/hls/{quality}/playlist.m3u8")
+async def get_hls_quality_playlist(
+    video_id: int,
+    quality: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get HLS playlist for a specific quality level.
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    playlist_path = hls_service.get_quality_playlist_path(video.file_path, quality)
+
+    if not os.path.exists(playlist_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Quality '{quality}' not available"
+        )
+
+    with open(playlist_path, 'r') as f:
+        content = f.read()
+
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/vnd.apple.mpegurl",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+
+@router.get("/{video_id}/hls/{quality}/{segment}")
+async def get_hls_segment(
+    video_id: int,
+    quality: str,
+    segment: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get HLS segment file (.ts).
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    hls_dir = hls_service.get_hls_directory(video.file_path)
+    segment_path = hls_dir / quality / segment
+
+    if not segment_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Segment not found"
+        )
+
+    # Stream segment file
+    def iterfile():
+        with open(segment_path, 'rb') as f:
+            yield from f
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="video/MP2T",
+        headers={
+            "Cache-Control": "public, max-age=31536000",  # 1 year cache
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+
+@router.get("/{video_id}/hls/status")
+async def get_hls_status(
+    video_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Check HLS conversion status for a video.
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    is_available = hls_service.is_hls_available(video.file_path)
+    available_qualities = hls_service.get_available_hls_qualities(video.file_path)
+
+    return {
+        "video_id": video_id,
+        "hls_available": is_available,
+        "available_qualities": available_qualities,
+        "master_playlist_url": f"/api/v1/videos/{video_id}/hls/master.m3u8" if is_available else None
+    }

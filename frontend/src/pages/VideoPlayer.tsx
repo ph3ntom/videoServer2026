@@ -85,6 +85,12 @@ export default function VideoPlayer() {
   const [uploadingThumbnail, setUploadingThumbnail] = useState(false);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [resumePosition, setResumePosition] = useState(0);
+  const [availableQualities, setAvailableQualities] = useState<string[]>(['original']);
+  const [selectedQuality, setSelectedQuality] = useState<string>('original');
+  const [hlsAvailable, setHlsAvailable] = useState(false);
+  const [hlsConverting, setHlsConverting] = useState(false);
+  const [useHls, setUseHls] = useState(true); // Use HLS by default
+  const [currentPlayingQuality, setCurrentPlayingQuality] = useState<string>(''); // Currently playing quality
   const navigate = useNavigate();
   const { user} = useAuthStore();
   const videoRef = useRef<HTMLDivElement>(null);
@@ -161,7 +167,12 @@ export default function VideoPlayer() {
       videoElement.classList.add('vjs-big-play-centered');
       videoRef.current.appendChild(videoElement);
 
-      const videoUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/stream`;
+      // Use HLS if available, otherwise fallback to direct stream
+      const videoUrl = hlsAvailable
+        ? `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/hls/master.m3u8`
+        : `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/stream?quality=${selectedQuality}`;
+
+      const videoType = hlsAvailable ? 'application/x-mpegURL' : 'video/mp4';
 
       const player = (playerRef.current = videojs(videoElement, {
         autoplay: false,
@@ -172,9 +183,16 @@ export default function VideoPlayer() {
         sources: [
           {
             src: videoUrl,
-            type: 'video/mp4'
+            type: videoType
           }
-        ]
+        ],
+        html5: {
+          vhs: {
+            overrideNative: true
+          },
+          nativeAudioTracks: false,
+          nativeVideoTracks: false
+        }
       }));
 
       // Player ready event
@@ -186,6 +204,36 @@ export default function VideoPlayer() {
           await apiClient.post(`/videos/${video.id}/view`);
         } catch (err) {
           console.error('Failed to increment view count:', err);
+        }
+
+        // Monitor quality changes for HLS
+        if (hlsAvailable) {
+          const updateQualityInfo = () => {
+            try {
+              const tech = player.tech({ IWillNotUseThisInPlugins: true });
+              if (tech && tech.vhs && tech.vhs.playlists && tech.vhs.playlists.media) {
+                const currentPlaylist = tech.vhs.playlists.media();
+                if (currentPlaylist && currentPlaylist.attributes) {
+                  const resolution = currentPlaylist.attributes.RESOLUTION;
+                  if (resolution) {
+                    const height = resolution.height;
+                    const qualityLabel = height >= 2160 ? '4K' : height >= 1080 ? '1080p' : height >= 720 ? '720p' : '480p';
+                    setCurrentPlayingQuality(qualityLabel);
+                    console.log(`[HLS] Currently playing: ${qualityLabel} (${resolution.width}x${resolution.height})`);
+                  }
+                }
+              }
+            } catch (e) {
+              // Ignore errors
+            }
+          };
+
+          // Update quality info periodically
+          const qualityMonitor = setInterval(updateQualityInfo, 2000);
+          player.on('dispose', () => clearInterval(qualityMonitor));
+
+          // Initial update
+          setTimeout(updateQualityInfo, 1000);
         }
       });
 
@@ -230,7 +278,7 @@ export default function VideoPlayer() {
         playerRef.current = null;
       }
     };
-  }, [video, user]);
+  }, [video, user, hlsAvailable]);
 
   const saveWatchProgress = async () => {
     if (!playerRef.current || !video || !user) return;
@@ -268,6 +316,47 @@ export default function VideoPlayer() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Check HLS conversion status
+  const checkHlsStatus = async (videoId: number) => {
+    try {
+      const response = await apiClient.get(`/videos/${videoId}/hls/status`);
+      setHlsAvailable(response.data.hls_available);
+      if (response.data.hls_available) {
+        setAvailableQualities(response.data.available_qualities);
+      }
+      return response.data.hls_available;
+    } catch (error) {
+      console.error('Failed to check HLS status:', error);
+      return false;
+    }
+  };
+
+  // Trigger HLS conversion
+  const convertToHls = async (videoId: number) => {
+    try {
+      setHlsConverting(true);
+      const response = await apiClient.post(`/videos/${videoId}/convert-hls`);
+      console.log('HLS conversion started:', response.data);
+
+      // Poll for conversion completion
+      const checkInterval = setInterval(async () => {
+        const isReady = await checkHlsStatus(videoId);
+        if (isReady) {
+          clearInterval(checkInterval);
+          setHlsConverting(false);
+          // Reload player with HLS
+          window.location.reload();
+        }
+      }, 5000); // Check every 5 seconds
+
+      return response.data;
+    } catch (error) {
+      console.error('Failed to start HLS conversion:', error);
+      setHlsConverting(false);
+      return null;
+    }
+  };
+
   const loadVideo = async (videoId: number) => {
     setLoading(true);
     setError('');
@@ -278,10 +367,94 @@ export default function VideoPlayer() {
       loadThumbnails(videoId);
       loadTags(videoId);
       loadRatingStats(videoId);
+
+      // Check HLS status first
+      const isHlsReady = await checkHlsStatus(videoId);
+      if (!isHlsReady && useHls) {
+        // HLS not available, but we want to use it - keep old quality system for now
+        loadAvailableQualities(videoId);
+      }
     } catch (err: any) {
       setError('비디오를 불러오는데 실패했습니다');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAvailableQualities = async (videoId: number) => {
+    try {
+      const response = await apiClient.get(`/videos/${videoId}/qualities`);
+      setAvailableQualities(response.data.available_qualities);
+    } catch (err: any) {
+      console.error('Failed to load available qualities:', err);
+      // Fallback to original only
+      setAvailableQualities(['original']);
+    }
+  };
+
+  const changeQuality = (quality: string) => {
+    if (!playerRef.current || !video) return;
+
+    const currentTime = playerRef.current.currentTime();
+    const isPaused = playerRef.current.paused();
+
+    setSelectedQuality(quality);
+
+    if (hlsAvailable) {
+      // HLS mode: Change to specific quality playlist or use master for auto
+      let newVideoUrl: string;
+
+      if (quality === 'auto') {
+        // Use master playlist for adaptive streaming
+        newVideoUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/hls/master.m3u8`;
+        console.log(`[HLS] Switched to AUTO mode (adaptive streaming)`);
+      } else {
+        // Use specific quality playlist for fixed quality
+        newVideoUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/hls/${quality}/playlist.m3u8`;
+        console.log(`[HLS] Switched to FIXED quality: ${quality}`);
+      }
+
+      // Reset the player to force reload
+      playerRef.current.pause();
+      playerRef.current.src({
+        src: newVideoUrl,
+        type: 'application/x-mpegURL'
+      });
+
+      // Force load the new source
+      playerRef.current.load();
+
+      // Wait for loadedmetadata before seeking
+      playerRef.current.one('loadedmetadata', () => {
+        // Restore playback position
+        playerRef.current!.currentTime(currentTime);
+
+        // Update quality display immediately
+        setTimeout(() => {
+          setCurrentPlayingQuality(quality === 'auto' ? '자동' : quality.toUpperCase());
+          console.log(`[HLS] Quality display updated to: ${quality}`);
+        }, 500);
+
+        // Resume playback if it was playing
+        if (!isPaused) {
+          playerRef.current!.play();
+        }
+      });
+    } else {
+      // Non-HLS mode: Change source URL
+      const newVideoUrl = `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/stream?quality=${quality}`;
+      playerRef.current.src({
+        src: newVideoUrl,
+        type: 'video/mp4'
+      });
+
+      // Restore playback position
+      playerRef.current.currentTime(currentTime);
+
+      // Resume playback if it was playing
+      if (!isPaused) {
+        playerRef.current.play();
+      }
     }
   };
 
@@ -543,6 +716,69 @@ export default function VideoPlayer() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Quality Selector */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-400">화질 선택:</span>
+            <select
+              value={selectedQuality}
+              onChange={(e) => changeQuality(e.target.value)}
+              className="bg-gray-700 text-white px-4 py-2 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            >
+              {hlsAvailable && <option value="auto">자동 (권장) ✓</option>}
+              {hlsAvailable && availableQualities.map(q => (
+                <option key={q} value={q}>{q.toUpperCase()} ✓</option>
+              ))}
+              {!hlsAvailable && (
+                <>
+                  <option value="original">원본 {availableQualities.includes('original') && '✓'}</option>
+                  <option value="480p">480P {availableQualities.includes('480p') ? '✓' : '(변환 필요)'}</option>
+                  <option value="720p">720P {availableQualities.includes('720p') ? '✓' : '(변환 필요)'}</option>
+                  <option value="1080p">1080P {availableQualities.includes('1080p') ? '✓' : '(변환 필요)'}</option>
+                  <option value="4k">4K {availableQualities.includes('4k') ? '✓' : '(변환 필요)'}</option>
+                </>
+              )}
+            </select>
+          </div>
+
+          {/* HLS Status */}
+          <div className="mt-2 text-xs">
+            {hlsAvailable ? (
+              <div className="bg-green-900/30 border border-green-700 rounded p-2 text-green-300">
+                <p className="font-semibold">✅ HLS 스트리밍 활성화</p>
+                <p className="mt-1">
+                  네트워크 상황에 따라 자동으로 최적 화질이 선택됩니다.
+                  {currentPlayingQuality && (
+                    <span className="block mt-1 font-bold text-green-200">
+                      📺 현재 재생 중: {currentPlayingQuality}
+                    </span>
+                  )}
+                </p>
+              </div>
+            ) : hlsConverting ? (
+              <div className="bg-yellow-900/30 border border-yellow-700 rounded p-2 text-yellow-300">
+                <p className="font-semibold">⏳ HLS 변환 진행 중...</p>
+                <p className="mt-1">변환이 완료되면 자동으로 HLS 스트리밍이 활성화됩니다.</p>
+              </div>
+            ) : (
+              <div className="bg-blue-900/30 border border-blue-700 rounded p-2 text-blue-300">
+                <p className="font-semibold">ℹ️ HLS 변환 가능</p>
+                <p className="mt-1">
+                  HLS로 변환하면 네트워크 상황에 따라 자동으로 최적 화질이 선택됩니다.
+                </p>
+                {video && user && video.user_id === user.id && (
+                  <button
+                    onClick={() => convertToHls(video.id)}
+                    className="mt-2 w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-md transition-colors"
+                  >
+                    HLS로 변환하기
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Video Info */}
