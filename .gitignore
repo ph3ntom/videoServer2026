@@ -21,3 +21,5 @@ Thumbs.db
 /uploads/
 /videos/
 /thumbnails/
+storage/videos/
+storage/videos/**/*
