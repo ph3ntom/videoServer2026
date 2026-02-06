@@ -136,13 +136,24 @@ Docker                   # 컨테이너화 (추후)
 
 ## 🚀 빠른 시작
 
+> **자동 설치**: `./setup.sh` 스크립트를 실행하면 대부분의 설정을 자동화할 수 있습니다.
+
 ### 1. 저장소 클론
 ```bash
-git clone <repository-url>
-cd videos_web_server
+git clone https://github.com/ph3ntom/videoServer2026.git
+cd videoServer2026
 ```
 
-### 2. 데이터베이스 생성
+### 2. 자동 설치 (추천)
+```bash
+chmod +x setup.sh
+./setup.sh
+# 스크립트가 안내하는 데로 데이터베이스 설정 및 .env 파일 수정
+```
+
+**또는 수동 설치를 원하시면 아래 단계를 따르세요.**
+
+### 3. 데이터베이스 생성
 ```bash
 sudo -u postgres psql
 ```
@@ -167,7 +178,12 @@ pip install -r requirements.txt
 
 # 환경변수 설정
 cp .env.example .env
-nano .env  # DATABASE_URL, SECRET_KEY 등 수정
+nano .env  # 아래 항목들을 수정하세요
+
+# 필수 수정 항목:
+# DATABASE_URL=postgresql+asyncpg://streamflix:your_password@localhost:5432/streamflix
+# SECRET_KEY=<아래 명령으로 생성한 랜덤 키>
+# python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 # 데이터베이스 마이그레이션
 alembic upgrade head
@@ -490,6 +506,44 @@ alembic history
 ---
 
 ## 🛠️ 문제 해결
+
+### 초기 설치 시 자주 발생하는 오류
+
+#### 1. Alembic 마이그레이션 실패
+```bash
+# 오류: sqlalchemy.exc.ProgrammingError: relation "users" already exists
+# 해결: 데이터베이스 초기화 후 다시 마이그레이션
+psql -U streamflix -d streamflix -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+cd backend
+source venv/bin/activate
+alembic upgrade head
+```
+
+#### 2. Storage 디렉토리 없음 오류
+```bash
+# 오류: FileNotFoundError: [Errno 2] No such file or directory: 'storage/videos'
+# 해결: 디렉토리 수동 생성
+mkdir -p storage/videos storage/videos/thumbnails storage/thumbnails
+chmod 755 storage
+```
+
+#### 3. SECRET_KEY 관련 오류
+```bash
+# 오류: SECRET_KEY not set
+# 해결: .env 파일에 랜덤 키 생성
+cd backend
+python -c "import secrets; print(f'SECRET_KEY={secrets.token_urlsafe(32)}')" >> .env
+```
+
+#### 4. 의존성 설치 실패
+```bash
+# 오류: pip install 실패
+# 해결: pip 업그레이드 후 재시도
+cd backend
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+```
 
 ### PostgreSQL 연결 오류
 ```bash

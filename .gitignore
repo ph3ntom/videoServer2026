@@ -21,5 +21,10 @@ Thumbs.db
 /uploads/
 /videos/
 /thumbnails/
-storage/videos/
-storage/videos/**/*
+
+# Storage (ignore video files but keep directory structure)
+storage/videos/*
+storage/videos/thumbnails/*
+!storage/videos/.gitkeep
+!storage/videos/thumbnails/.gitkeep
+!storage/thumbnails/.gitkeep
