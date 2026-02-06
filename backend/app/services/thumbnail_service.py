@@ -205,19 +205,19 @@ class ThumbnailService:
     ) -> VideoThumbnail:
         """
         Select a thumbnail as the video's main thumbnail
-        
+
         Args:
             db: Database session
             video: Video object
             thumbnail_id: ID of thumbnail to select
-            
+
         Returns:
             Selected thumbnail object
         """
         # Deselect all thumbnails for this video
         for thumbnail in video.thumbnails:
             thumbnail.is_selected = False
-        
+
         # Find and select the specified thumbnail
         selected_thumbnail = None
         for thumbnail in video.thumbnails:
@@ -226,14 +226,109 @@ class ThumbnailService:
                 selected_thumbnail = thumbnail
                 video.thumbnail_path = thumbnail.file_path
                 break
-        
+
         if not selected_thumbnail:
             raise ValueError(f"Thumbnail {thumbnail_id} not found for video {video.id}")
-        
+
         await db.commit()
         await db.refresh(selected_thumbnail)
-        
+
         return selected_thumbnail
+
+    @staticmethod
+    def generate_preview_clips(
+        video_path: str,
+        video_id: int,
+        num_clips: int = 7,
+        clip_duration: int = 3
+    ) -> List[str]:
+        """
+        Generate preview video clips from the video for hover preview
+
+        Args:
+            video_path: Path to video file
+            video_id: Video ID for creating clips directory
+            num_clips: Number of preview clips to generate (default: 7)
+            clip_duration: Duration of each clip in seconds (default: 5)
+
+        Returns:
+            List of generated clip file paths
+        """
+        # Create clips directory (same as thumbnails directory)
+        clips_dir = Path(settings.UPLOAD_DIR) / "thumbnails" / str(video_id)
+        clips_dir.mkdir(parents=True, exist_ok=True)
+
+        clip_paths = []
+
+        try:
+            # Get video duration using FFprobe
+            duration_cmd = [
+                settings.FFPROBE_PATH,
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                video_path
+            ]
+
+            result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=10)
+            duration = float(result.stdout.strip())
+
+            # Calculate segment size
+            segment_size = duration / num_clips
+
+            # Generate clips from each segment
+            for i in range(num_clips):
+                # Calculate start time for this segment
+                # Start from the middle of each segment, offset by half clip duration
+                segment_middle = (i + 0.5) * segment_size
+                start_time = max(0, segment_middle - (clip_duration / 2))
+
+                # Ensure we don't go past the end of the video
+                if start_time + clip_duration > duration:
+                    start_time = max(0, duration - clip_duration)
+
+                output_file = clips_dir / f"preview_{i + 1}.mp4"
+
+                # FFmpeg command for clip extraction
+                # -ss: start time
+                # -t: duration
+                # scale=320:-1: resize to 320p width, maintain aspect ratio
+                # -c:v libx264: H.264 codec
+                # -preset veryfast: fast encoding
+                # -crf 28: quality (18-28, higher = lower quality/smaller file)
+                # -an: remove audio
+                # -movflags +faststart: optimize for streaming
+                cmd = [
+                    settings.FFMPEG_PATH,
+                    '-ss', str(start_time),
+                    '-t', str(clip_duration),
+                    '-i', video_path,
+                    '-vf', 'scale=320:-1',
+                    '-c:v', 'libx264',
+                    '-preset', 'veryfast',
+                    '-crf', '28',
+                    '-an',
+                    '-movflags', '+faststart',
+                    str(output_file)
+                ]
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=30  # 30 seconds timeout per clip
+                )
+
+                if result.returncode == 0 and output_file.exists():
+                    clip_paths.append(str(output_file))
+                    print(f"Generated preview clip {i + 1}/{num_clips} at {start_time:.2f}s")
+                else:
+                    print(f"Failed to generate preview clip {i + 1}: {result.stderr}")
+
+        except Exception as e:
+            print(f"Error generating preview clips: {e}")
+
+        return clip_paths
 
 
 thumbnail_service = ThumbnailService()

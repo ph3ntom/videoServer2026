@@ -7,10 +7,23 @@ import asyncio
 from pathlib import Path
 from typing import Optional, Literal
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 QualityType = Literal["480p", "720p", "1080p", "4k"]
+
+# In-memory progress tracking
+_conversion_progress: dict[str, dict] = {}
+# Format: {video_path: {
+#   "status": "converting" | "completed" | "failed",
+#   "progress": 0-100,
+#   "current_quality": "480p",
+#   "total_qualities": 4,
+#   "completed_qualities": 1,
+#   "started_at": datetime,
+#   "error": str | None
+# }}
 
 # Quality settings for HLS
 HLS_QUALITY_SETTINGS = {
@@ -219,7 +232,7 @@ async def convert_video_to_hls(
         True if successful
     """
     if qualities is None:
-        qualities = ["480p", "720p", "1080p"]  # Default qualities
+        qualities = ["480p", "720p", "1080p", "4k"]  # Default qualities
 
     hls_dir = get_hls_directory(original_path)
     hls_dir.mkdir(parents=True, exist_ok=True)
@@ -228,25 +241,79 @@ async def convert_video_to_hls(
     print(f"[HLS] Qualities: {', '.join(qualities)}")
     logger.info(f"Starting HLS conversion for {original_path}")
 
+    # Initialize progress tracking
+    _conversion_progress[original_path] = {
+        "status": "converting",
+        "progress": 0,
+        "current_quality": qualities[0],
+        "total_qualities": len(qualities),
+        "completed_qualities": 0,
+        "started_at": datetime.now(),
+        "error": None
+    }
+
     # Convert each quality
     successful_qualities = []
-    for quality in qualities:
-        success = await convert_to_hls_quality(original_path, hls_dir, quality)
-        if success:
-            successful_qualities.append(quality)
+    try:
+        for idx, quality in enumerate(qualities):
+            # Update current quality
+            _conversion_progress[original_path]["current_quality"] = quality
+            _conversion_progress[original_path]["progress"] = int((idx / len(qualities)) * 100)
 
-    if not successful_qualities:
-        logger.error("No qualities were successfully converted")
-        print("[HLS] ❌ No qualities were successfully converted")
+            success = await convert_to_hls_quality(original_path, hls_dir, quality)
+            if success:
+                successful_qualities.append(quality)
+                _conversion_progress[original_path]["completed_qualities"] = len(successful_qualities)
+                _conversion_progress[original_path]["progress"] = int(((idx + 1) / len(qualities)) * 100)
+
+        if not successful_qualities:
+            logger.error("No qualities were successfully converted")
+            print("[HLS] ❌ No qualities were successfully converted")
+            _conversion_progress[original_path]["status"] = "failed"
+            _conversion_progress[original_path]["error"] = "No qualities were successfully converted"
+            return False
+
+        # Create master playlist
+        create_master_playlist(hls_dir, successful_qualities)
+
+        print(f"[HLS] ✅ Conversion complete. Available qualities: {', '.join(successful_qualities)}")
+        logger.info(f"HLS conversion complete: {successful_qualities}")
+
+        # Mark as completed
+        _conversion_progress[original_path]["status"] = "completed"
+        _conversion_progress[original_path]["progress"] = 100
+
+        return True
+
+    except Exception as e:
+        logger.error(f"HLS conversion failed: {e}")
+        _conversion_progress[original_path]["status"] = "failed"
+        _conversion_progress[original_path]["error"] = str(e)
         return False
 
-    # Create master playlist
-    create_master_playlist(hls_dir, successful_qualities)
 
-    print(f"[HLS] ✅ Conversion complete. Available qualities: {', '.join(successful_qualities)}")
-    logger.info(f"HLS conversion complete: {successful_qualities}")
+def get_conversion_progress(original_path: str) -> Optional[dict]:
+    """
+    Get HLS conversion progress for a video.
 
-    return True
+    Args:
+        original_path: Path to original video
+
+    Returns:
+        Progress dictionary or None if no conversion in progress
+    """
+    return _conversion_progress.get(original_path)
+
+
+def clear_conversion_progress(original_path: str):
+    """
+    Clear conversion progress tracking for a video.
+
+    Args:
+        original_path: Path to original video
+    """
+    if original_path in _conversion_progress:
+        del _conversion_progress[original_path]
 
 
 def delete_hls_files(original_path: str):

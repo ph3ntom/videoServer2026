@@ -29,8 +29,8 @@ class WatchHistory(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
-    user = relationship("User", backref="watch_history")
-    video = relationship("Video", backref="watch_history")
+    user = relationship("User", back_populates="watch_history")
+    video = relationship("Video", back_populates="watch_history")
 
     # Constraints
     __table_args__ = (

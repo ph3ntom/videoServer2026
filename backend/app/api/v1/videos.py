@@ -111,6 +111,23 @@ async def upload_video(
         print(f"Failed to generate thumbnails: {e}")
         # Continue without thumbnails
 
+    # Generate preview clips for hover preview
+    try:
+        clip_paths = thumbnail_service.generate_preview_clips(
+            str(file_path),
+            video.id,
+            num_clips=7,
+            clip_duration=3
+        )
+
+        if clip_paths:
+            print(f"Generated {len(clip_paths)} preview clips for video {video.id}")
+        else:
+            print(f"No preview clips generated for video {video.id}")
+    except Exception as e:
+        print(f"Failed to generate preview clips: {e}")
+        # Continue without preview clips
+
     return video
 
 
@@ -836,7 +853,13 @@ async def get_thumbnail_image(
     }
     media_type = media_types.get(file_ext, 'image/webp')
 
-    return FileResponse(thumbnail.file_path, media_type=media_type)
+    return FileResponse(
+        thumbnail.file_path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "no-cache, must-revalidate"
+        }
+    )
 
 
 @router.get("/{video_id}/thumbnail")
@@ -878,7 +901,114 @@ async def get_selected_thumbnail(
     }
     media_type = media_types.get(file_ext, 'image/webp')
 
-    return FileResponse(video.thumbnail_path, media_type=media_type)
+    return FileResponse(
+        video.thumbnail_path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "no-cache, must-revalidate"
+        }
+    )
+
+
+# Preview Clips endpoints (for hover preview)
+
+@router.get("/{video_id}/preview-clips")
+async def get_preview_clips(
+    video_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get list of available preview clips for a video
+
+    - **video_id**: Video ID
+
+    Returns:
+        {
+            "available": true/false,
+            "clips": [1, 2, 3, 4, 5, 6, 7]
+        }
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    # Check for preview clips in thumbnails directory
+    clips_dir = Path(settings.UPLOAD_DIR) / "thumbnails" / str(video_id)
+    available_clips = []
+
+    if clips_dir.exists():
+        for i in range(1, 8):  # Check for preview_1.mp4 ~ preview_7.mp4
+            clip_path = clips_dir / f"preview_{i}.mp4"
+            if clip_path.exists():
+                available_clips.append(i)
+
+    return {
+        "available": len(available_clips) > 0,
+        "clips": available_clips
+    }
+
+
+@router.get("/{video_id}/preview-clips/{clip_number}")
+async def get_preview_clip(
+    video_id: int,
+    clip_number: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a specific preview clip file
+
+    - **video_id**: Video ID
+    - **clip_number**: Clip number (1-7)
+
+    Returns:
+        MP4 video file
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+    from fastapi.responses import FileResponse
+
+    # Validate clip number
+    if clip_number < 1 or clip_number > 7:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Clip number must be between 1 and 7"
+        )
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    # Get clip file path
+    clips_dir = Path(settings.UPLOAD_DIR) / "thumbnails" / str(video_id)
+    clip_path = clips_dir / f"preview_{clip_number}.mp4"
+
+    if not clip_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Preview clip {clip_number} not found"
+        )
+
+    return FileResponse(
+        clip_path,
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache, must-revalidate"
+        }
+    )
 
 
 # Tag endpoints
@@ -1242,4 +1372,64 @@ async def get_hls_status(
         "hls_available": is_available,
         "available_qualities": available_qualities,
         "master_playlist_url": f"/api/v1/videos/{video_id}/hls/master.m3u8" if is_available else None
+    }
+
+
+@router.get("/{video_id}/hls/progress")
+async def get_hls_conversion_progress(
+    video_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get HLS conversion progress for a video.
+
+    Returns:
+    - status: "converting" | "completed" | "failed" | "not_started"
+    - progress: 0-100 (percentage)
+    - current_quality: Currently converting quality
+    - total_qualities: Total number of qualities to convert
+    - completed_qualities: Number of completed qualities
+    - error: Error message if failed
+    """
+    from sqlalchemy import select
+    from app.models.video import Video
+
+    result = await db.execute(select(Video).where(Video.id == video_id))
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Video not found"
+        )
+
+    # Check if already completed
+    if hls_service.is_hls_available(video.file_path):
+        return {
+            "video_id": video_id,
+            "status": "completed",
+            "progress": 100,
+            "current_quality": None,
+            "total_qualities": 4,
+            "completed_qualities": 4,
+            "error": None
+        }
+
+    # Get conversion progress
+    progress = hls_service.get_conversion_progress(video.file_path)
+
+    if not progress:
+        return {
+            "video_id": video_id,
+            "status": "not_started",
+            "progress": 0,
+            "current_quality": None,
+            "total_qualities": 4,
+            "completed_qualities": 0,
+            "error": None
+        }
+
+    return {
+        "video_id": video_id,
+        **progress
     }

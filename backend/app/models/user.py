@@ -36,6 +36,8 @@ class User(Base):
 
     # Relationships
     videos = relationship("Video", back_populates="uploader", cascade="all, delete-orphan")
+    ratings = relationship("Rating", back_populates="user", cascade="all, delete-orphan")
+    watch_history = relationship("WatchHistory", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, role={self.role})>"

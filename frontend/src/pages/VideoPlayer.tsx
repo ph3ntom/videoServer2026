@@ -89,6 +89,12 @@ export default function VideoPlayer() {
   const [selectedQuality, setSelectedQuality] = useState<string>('original');
   const [hlsAvailable, setHlsAvailable] = useState(false);
   const [hlsConverting, setHlsConverting] = useState(false);
+  const [hlsProgress, setHlsProgress] = useState<{
+    progress: number;
+    currentQuality: string | null;
+    completedQualities: number;
+    totalQualities: number;
+  } | null>(null);
   const [useHls, setUseHls] = useState(true); // Use HLS by default
   const [currentPlayingQuality, setCurrentPlayingQuality] = useState<string>(''); // Currently playing quality
   const navigate = useNavigate();
@@ -198,6 +204,79 @@ export default function VideoPlayer() {
       // Player ready event
       player.ready(async () => {
         console.log('Video.js player is ready');
+
+        // Add custom quality selector button
+        const QualityButton = videojs.getComponent('MenuButton');
+        const QualityMenuItem = videojs.getComponent('MenuItem');
+
+        class QualityMenuButton extends QualityButton {
+          constructor(player: any, options: any) {
+            super(player, options);
+            this.controlText('화질');
+          }
+
+          createEl() {
+            const el = super.createEl();
+            el.classList.add('vjs-quality-button');
+            return el;
+          }
+
+          createItems() {
+            const items: any[] = [];
+
+            if (hlsAvailable) {
+              // HLS mode: auto + available qualities
+              items.push(new QualityMenuItem(player, {
+                label: '자동',
+                selected: selectedQuality === 'auto',
+                selectable: true
+              }));
+
+              availableQualities.forEach((quality: string) => {
+                items.push(new QualityMenuItem(player, {
+                  label: quality.toUpperCase(),
+                  selected: selectedQuality === quality,
+                  selectable: true
+                }));
+              });
+            } else {
+              // Non-HLS mode: original + transcoded qualities
+              const qualities = ['original', '480p', '720p', '1080p', '4k'];
+              qualities.forEach((quality: string) => {
+                const isAvailable = availableQualities.includes(quality);
+                const label = quality === 'original' ? '원본' : quality.toUpperCase();
+                const displayLabel = isAvailable ? label : `${label} (변환 필요)`;
+
+                items.push(new QualityMenuItem(player, {
+                  label: displayLabel,
+                  selected: selectedQuality === quality,
+                  selectable: true
+                }));
+              });
+            }
+
+            // Add click handlers
+            items.forEach((item, index) => {
+              item.on('click', () => {
+                let quality: string;
+                if (hlsAvailable) {
+                  quality = index === 0 ? 'auto' : availableQualities[index - 1];
+                } else {
+                  const qualities = ['original', '480p', '720p', '1080p', '4k'];
+                  quality = qualities[index];
+                }
+                changeQuality(quality);
+              });
+            });
+
+            return items;
+          }
+        }
+
+        videojs.registerComponent('QualityMenuButton', QualityMenuButton);
+        player.getChild('controlBar').addChild('QualityMenuButton', {},
+          player.getChild('controlBar').children().length - 1
+        );
 
         // Increment view count
         try {
@@ -335,24 +414,55 @@ export default function VideoPlayer() {
   const convertToHls = async (videoId: number) => {
     try {
       setHlsConverting(true);
+      setHlsProgress({
+        progress: 0,
+        currentQuality: null,
+        completedQualities: 0,
+        totalQualities: 4
+      });
+
       const response = await apiClient.post(`/videos/${videoId}/convert-hls`);
       console.log('HLS conversion started:', response.data);
 
-      // Poll for conversion completion
+      // Poll for conversion progress
       const checkInterval = setInterval(async () => {
-        const isReady = await checkHlsStatus(videoId);
-        if (isReady) {
-          clearInterval(checkInterval);
-          setHlsConverting(false);
-          // Reload player with HLS
-          window.location.reload();
+        try {
+          // Check progress
+          const progressResponse = await apiClient.get(`/videos/${videoId}/hls/progress`);
+          const progressData = progressResponse.data;
+
+          console.log('HLS progress:', progressData);
+
+          setHlsProgress({
+            progress: progressData.progress,
+            currentQuality: progressData.current_quality,
+            completedQualities: progressData.completed_qualities,
+            totalQualities: progressData.total_qualities
+          });
+
+          // Check if completed
+          if (progressData.status === 'completed') {
+            clearInterval(checkInterval);
+            setHlsConverting(false);
+            setHlsProgress(null);
+            // Reload player with HLS
+            window.location.reload();
+          } else if (progressData.status === 'failed') {
+            clearInterval(checkInterval);
+            setHlsConverting(false);
+            setHlsProgress(null);
+            alert('HLS 변환에 실패했습니다: ' + (progressData.error || '알 수 없는 오류'));
+          }
+        } catch (err) {
+          console.error('Failed to check HLS progress:', err);
         }
-      }, 5000); // Check every 5 seconds
+      }, 2000); // Check every 2 seconds
 
       return response.data;
     } catch (error) {
       console.error('Failed to start HLS conversion:', error);
       setHlsConverting(false);
+      setHlsProgress(null);
       return null;
     }
   };
@@ -718,33 +828,9 @@ export default function VideoPlayer() {
           )}
         </div>
 
-        {/* Quality Selector */}
+        {/* HLS Status & Controls */}
         <div className="bg-gray-800 rounded-lg p-4 mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-gray-400">화질 선택:</span>
-            <select
-              value={selectedQuality}
-              onChange={(e) => changeQuality(e.target.value)}
-              className="bg-gray-700 text-white px-4 py-2 rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            >
-              {hlsAvailable && <option value="auto">자동 (권장) ✓</option>}
-              {hlsAvailable && availableQualities.map(q => (
-                <option key={q} value={q}>{q.toUpperCase()} ✓</option>
-              ))}
-              {!hlsAvailable && (
-                <>
-                  <option value="original">원본 {availableQualities.includes('original') && '✓'}</option>
-                  <option value="480p">480P {availableQualities.includes('480p') ? '✓' : '(변환 필요)'}</option>
-                  <option value="720p">720P {availableQualities.includes('720p') ? '✓' : '(변환 필요)'}</option>
-                  <option value="1080p">1080P {availableQualities.includes('1080p') ? '✓' : '(변환 필요)'}</option>
-                  <option value="4k">4K {availableQualities.includes('4k') ? '✓' : '(변환 필요)'}</option>
-                </>
-              )}
-            </select>
-          </div>
-
-          {/* HLS Status */}
-          <div className="mt-2 text-xs">
+          <div className="text-xs">
             {hlsAvailable ? (
               <div className="bg-green-900/30 border border-green-700 rounded p-2 text-green-300">
                 <p className="font-semibold">✅ HLS 스트리밍 활성화</p>
@@ -758,9 +844,39 @@ export default function VideoPlayer() {
                 </p>
               </div>
             ) : hlsConverting ? (
-              <div className="bg-yellow-900/30 border border-yellow-700 rounded p-2 text-yellow-300">
-                <p className="font-semibold">⏳ HLS 변환 진행 중...</p>
-                <p className="mt-1">변환이 완료되면 자동으로 HLS 스트리밍이 활성화됩니다.</p>
+              <div className="bg-yellow-900/30 border border-yellow-700 rounded p-3 text-yellow-300">
+                <p className="font-semibold mb-2">⏳ HLS 변환 진행 중...</p>
+
+                {hlsProgress && (
+                  <div className="space-y-2">
+                    {/* Progress Bar */}
+                    <div className="w-full bg-gray-700 rounded-full h-3 overflow-hidden">
+                      <div
+                        className="bg-yellow-500 h-full transition-all duration-300 ease-out"
+                        style={{ width: `${hlsProgress.progress}%` }}
+                      />
+                    </div>
+
+                    {/* Progress Info */}
+                    <div className="text-sm space-y-1">
+                      <p className="font-semibold text-yellow-200">
+                        {hlsProgress.progress}% 완료
+                      </p>
+                      {hlsProgress.currentQuality && (
+                        <p>
+                          🎬 현재 변환 중: <span className="font-bold">{hlsProgress.currentQuality.toUpperCase()}</span>
+                        </p>
+                      )}
+                      <p>
+                        📊 진행 상황: {hlsProgress.completedQualities}/{hlsProgress.totalQualities} 화질 완료
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <p className="mt-2 text-xs text-yellow-400">
+                  변환이 완료되면 자동으로 HLS 스트리밍이 활성화됩니다.
+                </p>
               </div>
             ) : (
               <div className="bg-blue-900/30 border border-blue-700 rounded p-2 text-blue-300">

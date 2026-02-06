@@ -49,6 +49,8 @@ class Video(Base):
     # Relationships
     uploader = relationship("User", back_populates="videos")
     thumbnails = relationship("VideoThumbnail", back_populates="video", cascade="all, delete-orphan")
+    ratings = relationship("Rating", back_populates="video", cascade="all, delete-orphan")
+    watch_history = relationship("WatchHistory", back_populates="video", cascade="all, delete-orphan")
     tags = relationship("Tag", secondary="video_tags", back_populates="videos")
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
     category = relationship("Category", back_populates="videos")

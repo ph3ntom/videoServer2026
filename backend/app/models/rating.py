@@ -22,8 +22,8 @@ class Rating(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
-    user = relationship("User", backref="ratings")
-    video = relationship("Video", backref="ratings")
+    user = relationship("User", back_populates="ratings")
+    video = relationship("Video", back_populates="ratings")
 
     # Constraints
     __table_args__ = (

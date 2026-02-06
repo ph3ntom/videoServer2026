@@ -36,7 +36,11 @@ function VideoCard({ video }: VideoCardProps) {
   const [currentThumbnailIndex, setCurrentThumbnailIndex] = useState(0);
   const [isHovering, setIsHovering] = useState(false);
   const [isInView, setIsInView] = useState(false);
+  const [previewClipsAvailable, setPreviewClipsAvailable] = useState(false);
+  const [currentClipIndex, setCurrentClipIndex] = useState(0);
+  const [isPlayingPreview, setIsPlayingPreview] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -68,6 +72,7 @@ function VideoCard({ video }: VideoCardProps) {
   useEffect(() => {
     if (isInView && thumbnails.length === 0) {
       loadThumbnails();
+      checkPreviewClips();
     }
   }, [isInView]);
 
@@ -86,6 +91,16 @@ function VideoCard({ video }: VideoCardProps) {
     }
   };
 
+  const checkPreviewClips = async () => {
+    try {
+      const response = await apiClient.get(`/videos/${video.id}/preview-clips`);
+      setPreviewClipsAvailable(response.data.available);
+    } catch (err) {
+      console.error('Failed to check preview clips:', err);
+      setPreviewClipsAvailable(false);
+    }
+  };
+
   // Handle mouse enter with debounce
   const handleMouseEnter = useCallback(() => {
     if (hoverTimeoutRef.current) {
@@ -94,15 +109,22 @@ function VideoCard({ video }: VideoCardProps) {
 
     // Debounce: wait 300ms before starting animation
     hoverTimeoutRef.current = setTimeout(() => {
-      setIsHovering(true);
-      if (thumbnails.length > 1) {
-        // Start cycling thumbnails every 1 second
-        intervalRef.current = setInterval(() => {
-          setCurrentThumbnailIndex((prev) => (prev + 1) % thumbnails.length);
-        }, 1000);
+      if (previewClipsAvailable) {
+        // Play preview clips
+        setIsPlayingPreview(true);
+        setCurrentClipIndex(0);
+      } else {
+        // Fall back to thumbnail cycling
+        setIsHovering(true);
+        if (thumbnails.length > 1) {
+          // Start cycling thumbnails every 1 second
+          intervalRef.current = setInterval(() => {
+            setCurrentThumbnailIndex((prev) => (prev + 1) % thumbnails.length);
+          }, 1000);
+        }
       }
     }, 300);
-  }, [thumbnails.length]);
+  }, [previewClipsAvailable, thumbnails.length]);
 
   // Handle mouse leave
   const handleMouseLeave = useCallback(() => {
@@ -119,8 +141,25 @@ function VideoCard({ video }: VideoCardProps) {
     }
 
     setIsHovering(false);
+    setIsPlayingPreview(false);
     setCurrentThumbnailIndex(0);
+    setCurrentClipIndex(0);
   }, []);
+
+  // Update video src when clip index changes
+  useEffect(() => {
+    if (isPlayingPreview && videoRef.current) {
+      // Add cache buster to force reload of new 3-second clips
+      const cacheBuster = Date.now();
+      const newSrc = `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/preview-clips/${currentClipIndex + 1}?v=${cacheBuster}`;
+      console.log(`[VideoCard ${video.id}] Loading clip ${currentClipIndex + 1}/7: ${newSrc}`);
+      videoRef.current.src = newSrc;
+      videoRef.current.load();
+      videoRef.current.play().catch(err => {
+        console.error(`[VideoCard ${video.id}] Failed to play clip ${currentClipIndex + 1}:`, err);
+      });
+    }
+  }, [currentClipIndex, isPlayingPreview, video.id]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -151,12 +190,17 @@ function VideoCard({ video }: VideoCardProps) {
   }, []);
 
   const getThumbnailUrl = useMemo(() => {
+    // Use thumbnail_path as cache buster to force reload when thumbnail changes
+    const cacheBuster = video.thumbnail_path
+      ? encodeURIComponent(video.thumbnail_path.split('/').pop() || '')
+      : Date.now();
+
     if (isHovering && thumbnails.length > 0) {
       const thumbnail = thumbnails[currentThumbnailIndex];
-      return `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/thumbnails/${thumbnail.id}/image`;
+      return `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/thumbnails/${thumbnail.id}/image?v=${cacheBuster}`;
     }
-    return `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/thumbnail`;
-  }, [isHovering, thumbnails, currentThumbnailIndex, video.id]);
+    return `${import.meta.env.VITE_API_BASE_URL}/api/v1/videos/${video.id}/thumbnail?v=${cacheBuster}`;
+  }, [isHovering, thumbnails, currentThumbnailIndex, video.id, video.thumbnail_path]);
 
   return (
     <Link
@@ -168,16 +212,68 @@ function VideoCard({ video }: VideoCardProps) {
     >
       {/* Thumbnail */}
       <div className="aspect-video bg-gray-700 flex items-center justify-center relative overflow-hidden">
-        {video.thumbnail_path ? (
-          <img
-            src={getThumbnailUrl}
-            alt={video.title}
-            className="w-full h-full object-cover transition-opacity duration-300"
-            style={{ opacity: 1 }}
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-          />
+        {isPlayingPreview ? (
+          <>
+            {/* Preview video clip */}
+            <video
+              ref={videoRef}
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+              onError={() => {
+                // Fallback to thumbnail on error
+                console.error(`[VideoCard ${video.id}] Video error`);
+                setIsPlayingPreview(false);
+                setPreviewClipsAvailable(false);
+              }}
+              onEnded={() => {
+                // Move to next clip when current clip ends
+                console.log(`[VideoCard ${video.id}] Clip ${currentClipIndex + 1} ended, moving to next clip`);
+                setCurrentClipIndex((prev) => (prev + 1) % 7);
+              }}
+            />
+            {/* Clip progress indicator */}
+            <div className="absolute top-2 right-2 flex gap-1">
+              {[...Array(7)].map((_, index) => (
+                <div
+                  key={index}
+                  className={`h-1 rounded-full transition-all ${
+                    index === currentClipIndex
+                      ? 'w-4 bg-white'
+                      : 'w-1 bg-white/50'
+                  }`}
+                />
+              ))}
+            </div>
+          </>
+        ) : video.thumbnail_path ? (
+          <>
+            {/* Static or cycling thumbnail images */}
+            <img
+              src={getThumbnailUrl}
+              alt={video.title}
+              className="w-full h-full object-cover transition-opacity duration-300"
+              style={{ opacity: 1 }}
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+            {/* Hover indicator for thumbnail cycling */}
+            {isHovering && thumbnails.length > 1 && (
+              <div className="absolute top-2 right-2 flex gap-1">
+                {thumbnails.map((_, index) => (
+                  <div
+                    key={index}
+                    className={`h-1 rounded-full transition-all ${
+                      index === currentThumbnailIndex
+                        ? 'w-4 bg-white'
+                        : 'w-1 bg-white/50'
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         ) : (
           <svg
             className="w-16 h-16 text-gray-600"
@@ -199,21 +295,6 @@ function VideoCard({ video }: VideoCardProps) {
               className="h-full bg-red-600 transition-all"
               style={{ width: `${video.watch_progress}%` }}
             />
-          </div>
-        )}
-        {/* Hover indicator */}
-        {isHovering && thumbnails.length > 1 && (
-          <div className="absolute top-2 right-2 flex gap-1">
-            {thumbnails.map((_, index) => (
-              <div
-                key={index}
-                className={`h-1 rounded-full transition-all ${
-                  index === currentThumbnailIndex
-                    ? 'w-4 bg-white'
-                    : 'w-1 bg-white/50'
-                }`}
-              />
-            ))}
           </div>
         )}
       </div>
