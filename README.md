@@ -18,6 +18,8 @@ Netflix와 YouTube의 핵심 기능을 결합한 경량 비디오 스트리밍 �
 - [기술 스택](#-기술-스택)
 - [시스템 요구사항](#-시스템-요구사항)
 - [빠른 시작](#-빠른-시작)
+  - [로컬 설치](#로컬-설치)
+  - [Docker 설치](#docker-설치-추천)
 - [설치 가이드](#-설치-가이드)
 - [프로젝트 구조](#-프로젝트-구조)
 - [문제 해결](#-문제-해결)
@@ -135,6 +137,47 @@ Docker                   # 컨테이너화 (추후)
 ---
 
 ## 🚀 빠른 시작
+
+두 가지 설치 방법을 제공합니다:
+- **Docker** (추천): 5분 안에 설치 완료, 모든 의존성 자동 설치
+- **로컬 설치**: 직접 환경 구성, 더 많은 커스터마이징 가능
+
+---
+
+## Docker 설치 (추천)
+
+### 1. 저장소 클론
+```bash
+git clone https://github.com/ph3ntom/videoServer2026.git
+cd videoServer2026
+```
+
+### 2. 환경 변수 설정
+```bash
+cp .env.docker .env
+python3 -c "import secrets; print(f'SECRET_KEY={secrets.token_urlsafe(32)}')" >> .env
+nano .env  # POSTGRES_PASSWORD 수정
+```
+
+### 3. 실행
+```bash
+docker-compose up -d
+```
+
+### 4. 관리자 생성
+```bash
+docker exec -it streamflix-backend python create_admin.py
+```
+
+### 5. 접속
+- 웹사이트: http://localhost
+- API: http://localhost:8000/docs
+
+**상세 가이드**: [DOCKER-QUICKSTART.md](DOCKER-QUICKSTART.md) | [전체 문서](doc/DOCKER-DEPLOYMENT.md)
+
+---
+
+## 로컬 설치
 
 > **자동 설치**: `./setup.sh` 스크립트를 실행하면 대부분의 설정을 자동화할 수 있습니다.
 

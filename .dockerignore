@@ -1,0 +1,30 @@
+# Git
+.git/
+.gitignore
+
+# Documentation
+doc/
+*.md
+!README.md
+
+# Environment
+.env
+.env.local
+.env.docker
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Storage (will be mounted as volumes)
+storage/
+
+# Docker
+docker-compose.override.yml
